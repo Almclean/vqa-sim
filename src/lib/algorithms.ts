@@ -1,11 +1,14 @@
 import { MOLECULES, type MoleculeKey } from "../data/molecules";
 import { QuantumSimulator } from "./quantumSimulator";
-import { parseEdge } from "./utils";
+import { parseAndValidateEdge } from "./utils";
 import type { Algorithm } from "../types";
 
 type QaoaShift =
   | { kind: "gamma"; layer: number; edgeIndex: number; sign: 1 | -1 }
   | { kind: "beta"; layer: number; qubit: number; sign: 1 | -1 };
+
+const getValidatedEdgePairs = (nodeCount: number, edges: string[]): Array<[number, number]> =>
+  edges.map((edge) => parseAndValidateEdge(edge, nodeCount));
 
 const evaluateQaoaObjectiveWithSingleGateShift = (
   nodeCount: number,
@@ -16,7 +19,7 @@ const evaluateQaoaObjectiveWithSingleGateShift = (
 ): number => {
   if (nodeCount < 1) return 0;
   const sim = new QuantumSimulator(nodeCount);
-  const edgePairs = edges.map(parseEdge);
+  const edgePairs = getValidatedEdgePairs(nodeCount, edges);
   const layers = Math.max(gammas.length, betas.length);
 
   for (let q = 0; q < nodeCount; q += 1) {

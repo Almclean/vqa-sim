@@ -26,6 +26,7 @@ export function LearningRateSlider({
         max={0.4}
         step={0.01}
         value={learningRate}
+        aria-label={`Learning Rate (${algorithm.toUpperCase()})`}
         onChange={(e) => onChange(Number(e.target.value))}
         className="w-full accent-emerald-400"
       />

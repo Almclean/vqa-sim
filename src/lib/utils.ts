@@ -9,6 +9,30 @@ export const parseEdge = (key: string): [number, number] => {
   return [a, b];
 };
 
+export const parseAndValidateEdge = (key: string, nodeCount: number): [number, number] => {
+  const match = key.match(/^(\d+)-(\d+)$/);
+  if (!match) {
+    throw new Error(`Invalid edge "${key}": expected format "a-b" with non-negative integer endpoints.`);
+  }
+
+  const a = Number(match[1]);
+  const b = Number(match[2]);
+
+  if (!Number.isInteger(a) || !Number.isInteger(b)) {
+    throw new Error(`Invalid edge "${key}": endpoints must be integers.`);
+  }
+
+  if (a === b) {
+    throw new Error(`Invalid edge "${key}": self-loops are not supported.`);
+  }
+
+  if (a < 0 || b < 0 || a >= nodeCount || b >= nodeCount) {
+    throw new Error(`Invalid edge "${key}": endpoints must be between 0 and ${nodeCount - 1}.`);
+  }
+
+  return [a, b];
+};
+
 export const filterEdgesForNodeCount = (edges: string[], nodeCount: number): string[] =>
   edges.filter((key) => {
     const [a, b] = parseEdge(key);

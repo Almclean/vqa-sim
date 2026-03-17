@@ -1,5 +1,5 @@
+import { useEffect, useRef, useState, type Dispatch, type KeyboardEvent, type SetStateAction } from "react";
 import type { Algorithm } from "../types";
-import type { Dispatch, SetStateAction } from "react";
 
 type ParameterListProps = {
   algorithm: Algorithm;
@@ -12,6 +12,75 @@ type ParameterListProps = {
   setBetas: Dispatch<SetStateAction<number[]>>;
   setThetas: Dispatch<SetStateAction<number[]>>;
 };
+
+type NumericParamInputProps = {
+  label: string;
+  value: number;
+  disabled: boolean;
+  onCommit: (next: number) => void;
+};
+
+const formatDraft = (value: number): string => `${value}`;
+
+function NumericParamInput({ label, value, disabled, onCommit }: NumericParamInputProps): JSX.Element {
+  const [draft, setDraft] = useState<string>(() => formatDraft(value));
+  const cancelOnBlurRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    setDraft(formatDraft(value));
+  }, [value]);
+
+  const commitDraft = () => {
+    if (cancelOnBlurRef.current) {
+      cancelOnBlurRef.current = false;
+      setDraft(formatDraft(value));
+      return;
+    }
+
+    const trimmed = draft.trim();
+    if (trimmed === "" || trimmed === "-" || trimmed === "+" || trimmed === "." || trimmed === "-." || trimmed === "+.") {
+      setDraft(formatDraft(value));
+      return;
+    }
+
+    const next = Number(trimmed);
+    if (!Number.isFinite(next)) {
+      setDraft(formatDraft(value));
+      return;
+    }
+
+    onCommit(next);
+    setDraft(formatDraft(next));
+  };
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Enter") {
+      event.currentTarget.blur();
+    }
+    if (event.key === "Escape") {
+      cancelOnBlurRef.current = true;
+      setDraft(formatDraft(value));
+      event.currentTarget.blur();
+    }
+  };
+
+  return (
+    <label className="flex flex-col gap-1 text-xs text-neutral-400">
+      {label}
+      <input
+        type="number"
+        step="0.01"
+        inputMode="decimal"
+        value={draft}
+        disabled={disabled}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commitDraft}
+        onKeyDown={handleKeyDown}
+        className="rounded-md border border-neutral-700 bg-neutral-800 px-2 py-1 text-sm text-neutral-100 outline-none ring-cyan-400 focus:ring-2 disabled:opacity-50"
+      />
+    </label>
+  );
+}
 
 export function ParameterList({
   algorithm,
@@ -32,66 +101,46 @@ export function ParameterList({
         {algorithm === "qaoa"
           ? Array.from({ length: depth }, (_, i) => (
               <div key={`qaoa-param-${i}`} className="grid grid-cols-2 gap-2">
-                <label className="flex flex-col gap-1 text-xs text-neutral-400">
-                  gamma[{i}]
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={gammas[i] ?? 0}
-                    disabled={running}
-                    onChange={(e) => {
-                      const next = Number(e.target.value);
-                      if (!Number.isFinite(next)) return;
-                      setGammas((prev) => {
-                        const copy = [...prev];
-                        copy[i] = next;
-                        return copy;
-                      });
-                    }}
-                    className="rounded-md border border-neutral-700 bg-neutral-800 px-2 py-1 text-sm text-neutral-100 outline-none ring-cyan-400 focus:ring-2 disabled:opacity-50"
-                  />
-                </label>
-                <label className="flex flex-col gap-1 text-xs text-neutral-400">
-                  beta[{i}]
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={betas[i] ?? 0}
-                    disabled={running}
-                    onChange={(e) => {
-                      const next = Number(e.target.value);
-                      if (!Number.isFinite(next)) return;
-                      setBetas((prev) => {
-                        const copy = [...prev];
-                        copy[i] = next;
-                        return copy;
-                      });
-                    }}
-                    className="rounded-md border border-neutral-700 bg-neutral-800 px-2 py-1 text-sm text-neutral-100 outline-none ring-cyan-400 focus:ring-2 disabled:opacity-50"
-                  />
-                </label>
-              </div>
-            ))
-          : Array.from({ length: depth * 2 }, (_, i) => (
-              <label key={`vqe-param-${i}`} className="flex flex-col gap-1 text-xs text-neutral-400">
-                theta[{i}]
-                <input
-                  type="number"
-                  step="0.01"
-                  value={thetas[i] ?? 0}
+                <NumericParamInput
+                  label={`gamma[${i}]`}
+                  value={gammas[i] ?? 0}
                   disabled={running}
-                  onChange={(e) => {
-                    const next = Number(e.target.value);
-                    if (!Number.isFinite(next)) return;
-                    setThetas((prev) => {
+                  onCommit={(next) =>
+                    setGammas((prev) => {
                       const copy = [...prev];
                       copy[i] = next;
                       return copy;
-                    });
-                  }}
-                  className="rounded-md border border-neutral-700 bg-neutral-800 px-2 py-1 text-sm text-neutral-100 outline-none ring-cyan-400 focus:ring-2 disabled:opacity-50"
+                    })
+                  }
                 />
-              </label>
+                <NumericParamInput
+                  label={`beta[${i}]`}
+                  value={betas[i] ?? 0}
+                  disabled={running}
+                  onCommit={(next) =>
+                    setBetas((prev) => {
+                      const copy = [...prev];
+                      copy[i] = next;
+                      return copy;
+                    })
+                  }
+                />
+              </div>
+            ))
+          : Array.from({ length: depth * 2 }, (_, i) => (
+              <NumericParamInput
+                key={`vqe-param-${i}`}
+                label={`theta[${i}]`}
+                value={thetas[i] ?? 0}
+                disabled={running}
+                onCommit={(next) =>
+                  setThetas((prev) => {
+                    const copy = [...prev];
+                    copy[i] = next;
+                    return copy;
+                  })
+                }
+              />
             ))}
       </div>
     </section>

@@ -65,7 +65,11 @@ export function TargetDomainWidget({
             })}
 
             {graphPositions.map((p, idx) => (
-              <g key={`node-${idx}`} onClick={() => onNodeClick(idx)} className="cursor-pointer">
+              <g
+                key={`node-${idx}`}
+                onClick={running ? undefined : () => onNodeClick(idx)}
+                className={running ? "cursor-not-allowed opacity-60" : "cursor-pointer"}
+              >
                 <circle
                   cx={p.x}
                   cy={p.y}
@@ -91,19 +95,23 @@ export function TargetDomainWidget({
           <div className="flex gap-2">
             <button
               onClick={onAddNode}
+              disabled={running}
               className="flex-1 rounded-md border border-neutral-700 bg-neutral-800 px-3 py-2 text-sm hover:bg-neutral-700"
             >
               Add Node
             </button>
             <button
               onClick={onRemoveNode}
+              disabled={running}
               className="flex-1 rounded-md border border-neutral-700 bg-neutral-800 px-3 py-2 text-sm hover:bg-neutral-700"
             >
               Remove Node
             </button>
           </div>
 
-          <p className="text-xs text-neutral-500">Click one node, then another to toggle an edge.</p>
+          <p className="text-xs text-neutral-500">
+            {running ? "Stop the optimizer to edit the graph." : "Click one node, then another to toggle an edge."}
+          </p>
         </div>
       ) : (
         <div className="space-y-3 rounded-lg border border-neutral-800 bg-neutral-950/60 p-3">

@@ -1,5 +1,5 @@
 import type { CircuitColumn, CircuitMode } from "../types";
-import { parseEdge } from "./utils";
+import { parseAndValidateEdge } from "./utils";
 
 export const buildQaoaCircuit = (
   mode: CircuitMode,
@@ -9,7 +9,7 @@ export const buildQaoaCircuit = (
   betas: number[],
 ): CircuitColumn[] => {
   const columns: CircuitColumn[] = [];
-  const edgePairs = edges.map(parseEdge);
+  const edgePairs = edges.map((edge) => parseAndValidateEdge(edge, nodeCount));
   const layers = Math.max(gammas.length, betas.length);
 
   columns.push({

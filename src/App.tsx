@@ -49,12 +49,18 @@ const getEffectiveLearningRate = (
   vqeDecay: VqeDecayConfig,
 ): number => {
   if (algorithm !== "vqe" || !vqeDecay.enabled) return baseLearningRate;
+  const minLearningRate = Math.min(vqeDecay.minLearningRate, baseLearningRate);
   if (vqeDecay.mode === "exponential") {
-    return Math.max(vqeDecay.minLearningRate, baseLearningRate * Math.pow(vqeDecay.expGamma, iteration));
+    return Math.max(minLearningRate, baseLearningRate * Math.pow(vqeDecay.expGamma, iteration));
   }
   const decaySteps = Math.floor(iteration / Math.max(1, vqeDecay.stepEvery));
-  return Math.max(vqeDecay.minLearningRate, baseLearningRate * Math.pow(vqeDecay.stepFactor, decaySteps));
+  return Math.max(minLearningRate, baseLearningRate * Math.pow(vqeDecay.stepFactor, decaySteps));
 };
+
+const clampVqeDecayConfig = (config: VqeDecayConfig, baseLearningRate: number): VqeDecayConfig => ({
+  ...config,
+  minLearningRate: Math.min(config.minLearningRate, baseLearningRate),
+});
 
 export default function App(): JSX.Element {
   const [algorithm, setAlgorithm] = useState<Algorithm>("qaoa");
@@ -257,6 +263,7 @@ export default function App(): JSX.Element {
   );
 
   const handleNodeClick = (node: number) => {
+    if (running) return;
     if (selectedNode === null) {
       setSelectedNode(node);
       return;
@@ -273,6 +280,16 @@ export default function App(): JSX.Element {
     setCostHistory([]);
     setStopReason(null);
     vqeStallRef.current = 0;
+  };
+
+  const handleAddNode = () => {
+    if (running) return;
+    setNodeCount((n) => Math.min(8, n + 1));
+  };
+
+  const handleRemoveNode = () => {
+    if (running) return;
+    setNodeCount((n) => Math.max(2, n - 1));
   };
 
   const resetSimulation = () => {
@@ -315,8 +332,8 @@ export default function App(): JSX.Element {
               selectedNode={selectedNode}
               graphPositions={graphPositions}
               onNodeClick={handleNodeClick}
-              onAddNode={() => setNodeCount((n) => Math.min(8, n + 1))}
-              onRemoveNode={() => setNodeCount((n) => Math.max(2, n - 1))}
+              onAddNode={handleAddNode}
+              onRemoveNode={handleRemoveNode}
               molecule={molecule}
               onMoleculeChange={(next) => {
                 setMolecule(next);
@@ -332,14 +349,23 @@ export default function App(): JSX.Element {
               algorithm={algorithm}
               learningRate={learningRates[algorithm]}
               effectiveLearningRate={effectiveLearningRate}
-              onChange={(next) =>
+              onChange={(next) => {
                 setLearningRates((prev) => ({
                   ...prev,
                   [algorithm]: next,
-                }))
-              }
+                }));
+                if (algorithm === "vqe") {
+                  setVqeDecay((prev) => clampVqeDecayConfig(prev, next));
+                }
+              }}
             />
-            {algorithm === "vqe" ? <VqeScheduleControls config={vqeDecay} onChange={setVqeDecay} /> : null}
+            {algorithm === "vqe" ? (
+              <VqeScheduleControls
+                config={vqeDecay}
+                maxMinLearningRate={learningRates.vqe}
+                onChange={(next) => setVqeDecay(clampVqeDecayConfig(next, learningRates.vqe))}
+              />
+            ) : null}
             {algorithm === "vqe" ? <VqeEarlyStoppingControls config={vqeEarlyStop} onChange={setVqeEarlyStop} /> : null}
 
             <ParameterList

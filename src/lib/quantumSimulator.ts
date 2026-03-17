@@ -8,12 +8,21 @@ const cMul = (a: Complex, b: Complex): Complex => ({
 const cScale = (a: Complex, x: number): Complex => ({ re: a.re * x, im: a.im * x });
 const cProb = (a: Complex): number => a.re * a.re + a.im * a.im;
 
+const assertValidQubitIndex = (nQubits: number, qubit: number): void => {
+  if (!Number.isInteger(qubit) || qubit < 0 || qubit >= nQubits) {
+    throw new Error(`Invalid qubit index ${qubit}; expected an integer between 0 and ${nQubits - 1}.`);
+  }
+};
+
 export class QuantumSimulator {
   readonly nQubits: number;
   readonly dim: number;
   state: Complex[];
 
   constructor(nQubits: number) {
+    if (!Number.isInteger(nQubits) || nQubits < 1) {
+      throw new Error(`Invalid qubit count ${nQubits}; expected a positive integer.`);
+    }
     this.nQubits = nQubits;
     this.dim = 1 << nQubits;
     this.state = Array.from({ length: this.dim }, (_, i) => (i === 0 ? { re: 1, im: 0 } : { re: 0, im: 0 }));
@@ -32,6 +41,7 @@ export class QuantumSimulator {
     m10: Complex,
     m11: Complex,
   ): void {
+    assertValidQubitIndex(this.nQubits, qubit);
     const bit = 1 << qubit;
     for (let i = 0; i < this.dim; i += 1) {
       if ((i & bit) !== 0) continue;
@@ -56,7 +66,11 @@ export class QuantumSimulator {
   }
 
   applyXX(q1: number, q2: number, theta: number): void {
-    if (q1 === q2) return;
+    assertValidQubitIndex(this.nQubits, q1);
+    assertValidQubitIndex(this.nQubits, q2);
+    if (q1 === q2) {
+      throw new Error("XX requires two distinct qubits.");
+    }
     const qa = Math.min(q1, q2);
     const qb = Math.max(q1, q2);
     const bitA = 1 << qa;
@@ -90,6 +104,7 @@ export class QuantumSimulator {
   }
 
   expZ(qubit: number): number {
+    assertValidQubitIndex(this.nQubits, qubit);
     const bit = 1 << qubit;
     let exp = 0;
     for (let i = 0; i < this.dim; i += 1) {
@@ -100,6 +115,11 @@ export class QuantumSimulator {
   }
 
   expZZ(q1: number, q2: number): number {
+    assertValidQubitIndex(this.nQubits, q1);
+    assertValidQubitIndex(this.nQubits, q2);
+    if (q1 === q2) {
+      throw new Error("ZZ expectation requires two distinct qubits.");
+    }
     const bit1 = 1 << q1;
     const bit2 = 1 << q2;
     let exp = 0;
@@ -113,6 +133,11 @@ export class QuantumSimulator {
   }
 
   expXX(q1: number, q2: number): number {
+    assertValidQubitIndex(this.nQubits, q1);
+    assertValidQubitIndex(this.nQubits, q2);
+    if (q1 === q2) {
+      throw new Error("XX expectation requires two distinct qubits.");
+    }
     const rotated = this.clone();
     rotated.applyRy(q1, -Math.PI / 2);
     rotated.applyRy(q2, -Math.PI / 2);

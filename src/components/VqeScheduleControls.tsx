@@ -11,10 +11,15 @@ export type VqeDecayConfig = {
 
 type VqeScheduleControlsProps = {
   config: VqeDecayConfig;
+  maxMinLearningRate: number;
   onChange: (next: VqeDecayConfig) => void;
 };
 
-export function VqeScheduleControls({ config, onChange }: VqeScheduleControlsProps): JSX.Element {
+export function VqeScheduleControls({
+  config,
+  maxMinLearningRate,
+  onChange,
+}: VqeScheduleControlsProps): JSX.Element {
   return (
     <section className="space-y-2 rounded-lg border border-neutral-800 bg-neutral-950/60 p-3">
       <div className="flex items-center justify-between">
@@ -47,7 +52,7 @@ export function VqeScheduleControls({ config, onChange }: VqeScheduleControlsPro
         <input
           type="range"
           min={0.001}
-          max={0.08}
+          max={Math.max(0.001, maxMinLearningRate)}
           step={0.001}
           value={config.minLearningRate}
           onChange={(e) => onChange({ ...config, minLearningRate: Number(e.target.value) })}
