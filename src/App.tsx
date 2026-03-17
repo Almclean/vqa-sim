@@ -17,7 +17,14 @@ import {
   evaluateVqeEnergy,
 } from "./lib/algorithms";
 import { buildQaoaCircuit, buildVqeCircuit } from "./lib/circuitBuilders";
-import { edgeKey, makeDefaultBetas, makeDefaultGammas, makeDefaultThetas, parseEdge, resizeArray } from "./lib/utils";
+import {
+  edgeKey,
+  filterEdgesForNodeCount,
+  makeDefaultBetas,
+  makeDefaultGammas,
+  makeDefaultThetas,
+  resizeArray,
+} from "./lib/utils";
 import type { Algorithm, CircuitMode } from "./types";
 
 type LiveState = {
@@ -87,13 +94,14 @@ export default function App(): JSX.Element {
   });
   const [stopReason, setStopReason] = useState<"converged" | null>(null);
   const vqeStallRef = useRef<number>(0);
+  const effectiveEdges = useMemo(() => filterEdgesForNodeCount(edges, nodeCount), [edges, nodeCount]);
 
   const currentMetric = useMemo(() => {
     if (algorithm === "qaoa") {
-      return evaluateQaoaCost(nodeCount, edges, gammas, betas);
+      return evaluateQaoaCost(nodeCount, effectiveEdges, gammas, betas);
     }
     return evaluateVqeEnergy(thetas, molecule);
-  }, [algorithm, betas, edges, gammas, molecule, nodeCount, thetas]);
+  }, [algorithm, betas, effectiveEdges, gammas, molecule, nodeCount, thetas]);
 
   useEffect(() => {
     setRunning(false);
@@ -115,12 +123,7 @@ export default function App(): JSX.Element {
   }, [depth]);
 
   useEffect(() => {
-    setEdges((prev) =>
-      prev.filter((key) => {
-        const [a, b] = parseEdge(key);
-        return a < nodeCount && b < nodeCount;
-      }),
-    );
+    setEdges((prev) => filterEdgesForNodeCount(prev, nodeCount));
     setSelectedNode((prev) => (prev !== null && prev >= nodeCount ? null : prev));
     setIteration(0);
     setCostHistory([]);
@@ -141,7 +144,7 @@ export default function App(): JSX.Element {
     betas,
     thetas,
     nodeCount,
-    edges,
+    edges: effectiveEdges,
     molecule,
     learningRates,
     vqeDecay,
@@ -156,7 +159,7 @@ export default function App(): JSX.Element {
     betas,
     thetas,
     nodeCount,
-    edges,
+    edges: effectiveEdges,
     molecule,
     learningRates,
     vqeDecay,
@@ -228,10 +231,10 @@ export default function App(): JSX.Element {
 
   const circuitColumns = useMemo(() => {
     if (algorithm === "qaoa") {
-      return buildQaoaCircuit(circuitMode, nodeCount, edges, gammas, betas);
+      return buildQaoaCircuit(circuitMode, nodeCount, effectiveEdges, gammas, betas);
     }
     return buildVqeCircuit(circuitMode, thetas);
-  }, [algorithm, betas, circuitMode, edges, gammas, nodeCount, thetas]);
+  }, [algorithm, betas, circuitMode, effectiveEdges, gammas, nodeCount, thetas]);
 
   const qubitCount = algorithm === "qaoa" ? nodeCount : 2;
   const effectiveLearningRate = getEffectiveLearningRate(
@@ -282,7 +285,7 @@ export default function App(): JSX.Element {
       const b = makeDefaultBetas(depth);
       setGammas(g);
       setBetas(b);
-      setCostHistory([evaluateQaoaCost(nodeCount, edges, g, b)]);
+      setCostHistory([evaluateQaoaCost(nodeCount, effectiveEdges, g, b)]);
     } else {
       const t = makeDefaultThetas(depth);
       setThetas(t);
@@ -308,7 +311,7 @@ export default function App(): JSX.Element {
               algorithm={algorithm}
               running={running}
               nodeCount={nodeCount}
-              edges={edges}
+              edges={effectiveEdges}
               selectedNode={selectedNode}
               graphPositions={graphPositions}
               onNodeClick={handleNodeClick}
@@ -381,7 +384,7 @@ export default function App(): JSX.Element {
             <EnergyChart
               algorithm={algorithm}
               molecule={molecule}
-              edges={edges}
+              edges={effectiveEdges}
               costHistory={costHistory}
               currentMetric={currentMetric}
               iteration={iteration}

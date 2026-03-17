@@ -9,6 +9,12 @@ export const parseEdge = (key: string): [number, number] => {
   return [a, b];
 };
 
+export const filterEdgesForNodeCount = (edges: string[], nodeCount: number): string[] =>
+  edges.filter((key) => {
+    const [a, b] = parseEdge(key);
+    return a < nodeCount && b < nodeCount;
+  });
+
 export const resizeArray = (prev: number[], size: number, seed: (idx: number) => number): number[] =>
   Array.from({ length: size }, (_, i) => (Number.isFinite(prev[i]) ? prev[i] : seed(i)));
 
