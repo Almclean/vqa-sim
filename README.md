@@ -145,3 +145,8 @@ Open: `http://localhost:8080`
 - Simulation is state-vector based, so complexity scales exponentially with qubit count.
 - QAOA graph builder is currently capped at 8 nodes in the UI.
 - VQE module currently targets predefined 2-qubit parity-mapped Hamiltonians.
+
+## License
+
+This project is proprietary and is provided under an all-rights-reserved license.
+See [LICENSE](LICENSE).
