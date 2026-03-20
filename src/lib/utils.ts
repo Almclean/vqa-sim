@@ -36,7 +36,7 @@ export const parseAndValidateEdge = (key: string, nodeCount: number): [number, n
 export const filterEdgesForNodeCount = (edges: string[], nodeCount: number): string[] =>
   edges.filter((key) => {
     const [a, b] = parseEdge(key);
-    return a < nodeCount && b < nodeCount;
+    return a >= 0 && b >= 0 && a < nodeCount && b < nodeCount;
   });
 
 export const resizeArray = (prev: number[], size: number, seed: (idx: number) => number): number[] =>

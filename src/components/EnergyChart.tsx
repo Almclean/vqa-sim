@@ -26,6 +26,7 @@ export function EnergyChart({
   const latest = chartValues[chartValues.length - 1] ?? currentMetric;
   const previous = chartValues.length > 1 ? chartValues[chartValues.length - 2] : latest;
   const delta = latest - previous;
+  const isImprovement = algorithm === "vqe" ? delta < 0 : delta > 0;
 
   let yMin = Math.min(...chartValues);
   let yMax = Math.max(...chartValues);
@@ -74,7 +75,7 @@ export function EnergyChart({
           <span>Iteration: {iteration}</span>
           <span>
             Latest: {latest.toFixed(6)}{" "}
-            <span className={delta >= 0 ? "text-red-300" : "text-emerald-300"}>
+            <span className={isImprovement ? "text-emerald-300" : "text-red-300"}>
               ({delta >= 0 ? "+" : ""}
               {delta.toFixed(6)})
             </span>

@@ -37,7 +37,7 @@ Place your screenshot at `docs/vqa-simulator-ui.png` and it will render here:
   - Delta threshold
   - Patience
   - Minimum iteration gate
-- Energy/cost landscape chart with hover crosshair and exact values
+- Energy/cost landscape chart with hover crosshair, exact values, and per-step delta
 - Responsive dark-mode UI with horizontal circuit scrolling
 
 ## Physics / Algorithm Notes
@@ -48,6 +48,9 @@ Place your screenshot at `docs/vqa-simulator-ui.png` and it will render here:
   - Initial superposition
   - Cost layer with `ZZ(gamma)`
   - Mixer layer with `Rx(2 * beta)`
+- Objective shown in the UI:
+  - `C = sum_(i,j in E) (1 - <ZiZj>) / 2`
+  - This is the expected cut value over samples from the current state, so higher is better
 - Ion trap transpilation:
   - Initial `Ry(pi/2)`
   - Cost term: `Ry(pi/2) -> XX(gamma) -> Ry(-pi/2)`
@@ -56,6 +59,9 @@ Place your screenshot at `docs/vqa-simulator-ui.png` and it will render here:
 ### VQE (Chemistry)
 
 - 2-qubit hardware-efficient ansatz with repeated `Ry` rotations and `XX(pi/4)` entangling blocks
+- Metric shown in the UI:
+  - `E(theta) = <psi(theta)|H|psi(theta)>`
+  - This is the Hamiltonian expectation value for the current trial state, so lower is better
 - Hamiltonian form:
   - `E = g0 + g1<Z0> + g2<Z1> + g3<Z0Z1> + g4<X0X1>`
 - Molecules include predefined coefficients and theoretical minimum energy reference lines
@@ -65,6 +71,9 @@ Place your screenshot at `docs/vqa-simulator-ui.png` and it will render here:
 - Exact parameter-shift gradients
 - Optimization loop runs in a timed interval in React (`~150ms`)
 - Separate learning rates for QAOA and VQE
+- Objective direction:
+  - QAOA maximizes expected cut value
+  - VQE minimizes energy
 - VQE supports:
   - Decay schedule (exponential / step)
   - Early stopping based on consecutive low-delta updates
