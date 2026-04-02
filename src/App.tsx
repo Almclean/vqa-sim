@@ -26,7 +26,7 @@ import { buildQaoaCircuit, buildVqeCircuit } from "./lib/circuitBuilders";
 import {
   loadExecutionJobs,
   pollExecutionJobs,
-  retryExecutionJob,
+  retryExecutionJobInHistory,
   saveExecutionJobs,
   submitSamplingExecutionJob,
   type ExecutionJobRecord,
@@ -188,6 +188,8 @@ export default function App(): JSX.Element {
     sampledMetricDelta !== null && Math.abs(currentMetric) > 1e-9
       ? (Math.abs(sampledMetricDelta) / Math.abs(currentMetric)) * 100
       : null;
+  const resolveExecutionAuth = (targetId: typeof backendPreferences.executionTarget) =>
+    resolveProviderAuthForTarget(targetId, backendPreferences, providerSessionCredentials);
 
   useEffect(() => {
     setRunning(false);
@@ -512,17 +514,10 @@ export default function App(): JSX.Element {
               onClearHistory={() => setExecutionJobs([])}
               onPollJobs={() =>
                 setExecutionJobs((prev) =>
-                  pollExecutionJobs(
-                    prev,
-                    (targetId) => resolveProviderAuthForTarget(targetId, backendPreferences, providerSessionCredentials),
-                  ),
+                  pollExecutionJobs(prev, resolveExecutionAuth),
                 )
               }
-              onRetryJob={(jobId) =>
-                setExecutionJobs((prev) =>
-                  prev.map((job) => (job.id === jobId && job.status === "failed" ? retryExecutionJob(job) : job)),
-                )
-              }
+              onRetryJob={(jobId) => setExecutionJobs((prev) => retryExecutionJobInHistory(prev, jobId, resolveExecutionAuth))}
             />
 
             <TargetDomainWidget

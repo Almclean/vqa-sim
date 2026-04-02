@@ -5,6 +5,7 @@ import {
   markExecutionJobFailed,
   pollExecutionJobs,
   retryExecutionJob,
+  retryExecutionJobInHistory,
   saveExecutionJobs,
   submitSamplingExecutionJob,
 } from "./executionJobs";
@@ -60,6 +61,7 @@ describe("executionJobs", () => {
     expect(job.polling.attemptCount).toBe(0);
     expect(job.polling.resumable).toBe(true);
     expect(job.polling.providerStatus).toBe("submitted");
+    expect(job.request?.algorithm).toBe("vqe");
   });
 
   it("persists and restores execution job history", () => {
@@ -82,6 +84,16 @@ describe("executionJobs", () => {
           attemptCount: 0,
           retryCount: 0,
           resumable: false,
+        },
+        request: {
+          targetId: "dense-cpu" as const,
+          circuit: buildQaoaExecutionCircuit(2, [[0, 1]], [], []),
+          algorithm: "qaoa" as const,
+          shots: 64,
+          nodeCount: 2,
+          edges: ["0-1"],
+          gammas: [],
+          betas: [],
         },
       },
     ];
@@ -119,7 +131,7 @@ describe("executionJobs", () => {
     });
   });
 
-  it("maps resumable remote jobs through queued provider status before they start running", () => {
+  it("resumes remote jobs through running, pending result retrieval, and final completion", () => {
     const circuit = buildVqeExecutionCircuit([]);
     const queuedJob = submitSamplingExecutionJob(
       {
@@ -135,6 +147,8 @@ describe("executionJobs", () => {
 
     const [readyJob] = pollExecutionJobs([queuedJob], resolveProviderAuth, "2026-04-02T12:00:00.000Z");
     const [runningJob] = pollExecutionJobs([readyJob!], resolveProviderAuth, "2026-04-02T13:00:00.000Z");
+    const [retrievalPendingJob] = pollExecutionJobs([runningJob!], resolveProviderAuth, "2026-04-02T14:00:00.000Z");
+    const [completedJob] = pollExecutionJobs([retrievalPendingJob!], resolveProviderAuth, "2026-04-02T15:00:00.000Z");
 
     expect(readyJob?.status).toBe("queued");
     expect(readyJob?.polling.providerStatus).toBe("ready");
@@ -143,9 +157,15 @@ describe("executionJobs", () => {
     expect(runningJob?.polling.lastAttemptedAt).toBe("2026-04-02T13:00:00.000Z");
     expect(runningJob?.polling.externalJobId).toMatch(/^ionq_/);
     expect(runningJob?.polling.providerStatus).toBe("started");
+    expect(retrievalPendingJob?.status).toBe("running");
+    expect(retrievalPendingJob?.polling.providerStatus).toBe("completed");
+    expect(retrievalPendingJob?.polling.resultRetrievalState).toBe("pending");
+    expect(completedJob?.status).toBe("completed");
+    expect(completedJob?.polling.resultRetrievalState).toBe("retrieved");
+    expect(completedJob?.result?.bitstrings.length).toBeGreaterThan(0);
   });
 
-  it("can mark running jobs as failed and retry them", () => {
+  it("can retry failed jobs without overwriting the prior failed attempt", () => {
     const circuit = buildVqeExecutionCircuit([]);
     const queuedJob = submitSamplingExecutionJob(
       {
@@ -161,16 +181,20 @@ describe("executionJobs", () => {
 
     const [runningJob] = pollExecutionJobs([queuedJob], resolveProviderAuth, "2026-04-02T12:00:00.000Z");
     const failedJob = markExecutionJobFailed(runningJob!, "Provider timeout", "2026-04-02T13:00:00.000Z");
-    const retriedJob = retryExecutionJob(failedJob, "2026-04-02T14:00:00.000Z");
+    const { archivedJob, retriedJob } = retryExecutionJob(failedJob, resolveProviderAuth, "2026-04-02T14:00:00.000Z");
+    const history = retryExecutionJobInHistory([failedJob], failedJob.id, resolveProviderAuth, "2026-04-02T14:00:00.000Z");
 
     expect(failedJob.status).toBe("failed");
     expect(failedJob.errorMessage).toBe("Provider timeout");
+    expect(archivedJob.supersededByJobId).toBe(retriedJob.id);
     expect(retriedJob.status).toBe("queued");
     expect(retriedJob.polling.retryCount).toBe(1);
     expect(retriedJob.errorMessage).toBeUndefined();
     expect(retriedJob.polling.attemptCount).toBe(0);
-    expect(retriedJob.polling.providerStatus).toBeUndefined();
-    expect(retriedJob.statusDetail).toMatch(/re-queued/i);
+    expect(retriedJob.polling.providerStatus).toBe("submitted");
+    expect(retriedJob.sourceJobId).toBe(failedJob.id);
+    expect(history[0]?.sourceJobId).toBe(failedJob.id);
+    expect(history[1]?.supersededByJobId).toBe(history[0]?.id);
   });
 
   it("fails remote polling cleanly when the auth required for that provider is missing", () => {

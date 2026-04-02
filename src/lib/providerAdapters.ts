@@ -44,10 +44,20 @@ export type IonQJobStatusResponse = {
   errorMessage?: string;
 };
 
+export type IonQJobResultResponse = {
+  provider: "ionq";
+  jobId: string;
+  status: "pending" | "ready" | "failed";
+  statusDetail?: string;
+  result?: SamplingExecutionJobResult;
+  errorMessage?: string;
+};
+
 export interface IonQProviderTransport {
   readonly provider: "ionq";
   submitSamplingJob(request: SamplingExecutionJobRequest, submittedAt: string): IonQSubmissionResponse;
   getJobStatus(job: ExecutionJobRecord, polledAt: string): IonQJobStatusResponse;
+  getJobResult(job: ExecutionJobRecord, retrievedAt: string): IonQJobResultResponse;
 }
 
 const addMinutesToIsoTimestamp = (timestamp: string, minutes: number): string => {
@@ -139,6 +149,7 @@ const localProviderAdapter: ExecutionProviderAdapter = {
         retryCount: 0,
         resumable: false,
       },
+      request,
       result,
     };
   },
@@ -159,6 +170,15 @@ const defaultIonQTransport: IonQProviderTransport = {
     };
   },
   getJobStatus(job, polledAt) {
+    if (job.polling.providerStatus === "completed") {
+      return {
+        provider: "ionq",
+        jobId: job.polling.externalJobId ?? `ionq_${job.id}`,
+        status: "completed",
+        statusDetail: "IonQ execution is complete. Final result payload retrieval is still pending.",
+      };
+    }
+
     if (job.polling.attemptCount === 0) {
       return {
         provider: "ionq",
@@ -168,11 +188,47 @@ const defaultIonQTransport: IonQProviderTransport = {
       };
     }
 
+    if (job.polling.attemptCount === 1) {
+      return {
+        provider: "ionq",
+        jobId: job.polling.externalJobId ?? `ionq_${job.id}`,
+        status: "started",
+        statusDetail: `IonQ reports the job started execution as of ${new Date(polledAt).toLocaleString()}.`,
+      };
+    }
+
     return {
       provider: "ionq",
       jobId: job.polling.externalJobId ?? `ionq_${job.id}`,
-      status: "started",
-      statusDetail: `IonQ reports the job started execution as of ${new Date(polledAt).toLocaleString()}.`,
+      status: "completed",
+      statusDetail: "IonQ reports quantum execution is complete and final results are being prepared.",
+    };
+  },
+  getJobResult(job) {
+    if (!job.request) {
+      return {
+        provider: "ionq",
+        jobId: job.polling.externalJobId ?? `ionq_${job.id}`,
+        status: "failed",
+        errorMessage: "Remote result retrieval requires the original request snapshot.",
+      };
+    }
+
+    if ((job.polling.resultRetrievalAttemptCount ?? 0) === 0) {
+      return {
+        provider: "ionq",
+        jobId: job.polling.externalJobId ?? `ionq_${job.id}`,
+        status: "pending",
+        statusDetail: "IonQ finished execution, but the final result payload is not ready yet.",
+      };
+    }
+
+    return {
+      provider: "ionq",
+      jobId: job.polling.externalJobId ?? `ionq_${job.id}`,
+      status: "ready",
+      statusDetail: "Retrieved final IonQ result payload.",
+      result: runLocalSamplingJob(job.request),
     };
   },
 };
@@ -191,6 +247,9 @@ const mapIonQJobStatusToExecutionRecord = (
     nextSuggestedPollAt: undefined,
     externalJobId: response.jobId,
     providerStatus: response.status,
+    resultRetrievalState: job.polling.resultRetrievalState,
+    resultRetrievalAttemptCount: job.polling.resultRetrievalAttemptCount,
+    lastResultRetrievedAt: job.polling.lastResultRetrievedAt,
   };
 
   switch (response.status) {
@@ -221,6 +280,66 @@ const mapIonQJobStatusToExecutionRecord = (
         },
       };
     case "completed":
+      if (!response.result) {
+        const retrieval = ionqTransport.getJobResult(job, polledAt);
+        const retrievalAttemptCount = (job.polling.resultRetrievalAttemptCount ?? 0) + 1;
+
+        if (retrieval.status === "pending") {
+          return {
+            ...job,
+            status: "running",
+            updatedAt: polledAt,
+            startedAt: job.startedAt ?? polledAt,
+            statusDetail:
+              retrieval.statusDetail ?? `${job.targetLabel} finished execution remotely and is waiting for final results.`,
+            polling: {
+              ...basePollingState,
+              resumable: true,
+              nextSuggestedPollAt: addMinutesToIsoTimestamp(polledAt, 60),
+              resultRetrievalState: "pending",
+              resultRetrievalAttemptCount: retrievalAttemptCount,
+              lastResultRetrievedAt: polledAt,
+            },
+          };
+        }
+
+        if (retrieval.status === "failed") {
+          return {
+            ...job,
+            status: "failed",
+            updatedAt: polledAt,
+            statusDetail:
+              retrieval.statusDetail ?? `${job.targetLabel} completed remotely but final result retrieval failed.`,
+            polling: {
+              ...basePollingState,
+              resumable: false,
+              resultRetrievalState: "pending",
+              resultRetrievalAttemptCount: retrievalAttemptCount,
+              lastResultRetrievedAt: polledAt,
+            },
+            errorMessage: retrieval.errorMessage ?? `${job.targetLabel} could not retrieve final provider results.`,
+          };
+        }
+
+        return {
+          ...job,
+          status: "completed",
+          updatedAt: polledAt,
+          startedAt: job.startedAt ?? polledAt,
+          completedAt: polledAt,
+          statusDetail: retrieval.statusDetail ?? `${job.targetLabel} completed remotely.`,
+          polling: {
+            ...basePollingState,
+            resumable: false,
+            resultRetrievalState: "retrieved",
+            resultRetrievalAttemptCount: retrievalAttemptCount,
+            lastResultRetrievedAt: polledAt,
+          },
+          result: retrieval.result ?? job.result,
+          errorMessage: undefined,
+        };
+      }
+
       return {
         ...job,
         status: "completed",
@@ -231,6 +350,8 @@ const mapIonQJobStatusToExecutionRecord = (
         polling: {
           ...basePollingState,
           resumable: false,
+          resultRetrievalState: "retrieved",
+          lastResultRetrievedAt: polledAt,
         },
         result: response.result ?? job.result,
         errorMessage: undefined,
@@ -282,6 +403,7 @@ const ionqProviderAdapter: ExecutionProviderAdapter = {
       queueBehavior: "provider-queue",
       statusDetail,
       polling: makeQueuedPollingState(submittedAt, submission.jobId),
+      request,
     };
   },
   pollJob(job, nowIso, providerAuth) {

@@ -81,6 +81,9 @@ describe("providerAdapters", () => {
       getJobStatus() {
         throw new Error("getJobStatus should not be called in this test.");
       },
+      getJobResult() {
+        throw new Error("getJobResult should not be called in this test.");
+      },
     };
     setIonQProviderTransport(transport);
 
@@ -112,6 +115,9 @@ describe("providerAdapters", () => {
           status: "ready",
           statusDetail: "IonQ has accepted the job but has not started execution yet.",
         };
+      },
+      getJobResult() {
+        throw new Error("getJobResult should not be called in this test.");
       },
     };
     setIonQProviderTransport(transport);
@@ -145,6 +151,9 @@ describe("providerAdapters", () => {
           status: "started",
           statusDetail: "IonQ started execution on the selected backend.",
         };
+      },
+      getJobResult() {
+        throw new Error("getJobResult should not be called in this test.");
       },
     };
     setIonQProviderTransport(transport);
@@ -183,6 +192,9 @@ describe("providerAdapters", () => {
           },
         };
       },
+      getJobResult() {
+        throw new Error("getJobResult should not be called when the status payload already includes results.");
+      },
     };
     setIonQProviderTransport(transport);
 
@@ -220,6 +232,9 @@ describe("providerAdapters", () => {
           errorMessage: "Unsupported gate set for target backend.",
         };
       },
+      getJobResult() {
+        throw new Error("getJobResult should not be called in this test.");
+      },
     };
     setIonQProviderTransport(transport);
 
@@ -232,6 +247,46 @@ describe("providerAdapters", () => {
     expect(failedJob.errorMessage).toBe("Unsupported gate set for target backend.");
     expect(failedJob.polling.resumable).toBe(false);
     expect(failedJob.polling.providerStatus).toBe("failed");
+  });
+
+  it("keeps polling when provider execution is complete but final result retrieval is still pending", () => {
+    const transport: IonQProviderTransport = {
+      provider: "ionq",
+      submitSamplingJob() {
+        return {
+          provider: "ionq",
+          jobId: "ionq_job_123",
+          status: "submitted",
+        };
+      },
+      getJobStatus() {
+        return {
+          provider: "ionq",
+          jobId: "ionq_job_123",
+          status: "completed",
+          statusDetail: "IonQ completed quantum execution.",
+        };
+      },
+      getJobResult() {
+        return {
+          provider: "ionq",
+          jobId: "ionq_job_123",
+          status: "pending",
+          statusDetail: "IonQ is still packaging the final result payload.",
+        };
+      },
+    };
+    setIonQProviderTransport(transport);
+
+    const adapter = getExecutionProviderAdapter("ionq");
+    const queuedJob = adapter.submitSamplingJob(makeVqeRequest(), "2026-04-02T12:00:00.000Z", IONQ_BROWSER_SESSION_AUTH);
+    const retrievalPendingJob = adapter.pollJob(queuedJob, "2026-04-02T14:30:00.000Z", IONQ_BROWSER_SESSION_AUTH);
+
+    expect(retrievalPendingJob.status).toBe("running");
+    expect(retrievalPendingJob.polling.providerStatus).toBe("completed");
+    expect(retrievalPendingJob.polling.resultRetrievalState).toBe("pending");
+    expect(retrievalPendingJob.polling.resultRetrievalAttemptCount).toBe(1);
+    expect(retrievalPendingJob.result).toBeUndefined();
   });
 
   it("rejects IonQ browser-session submission when the tab has no API key", () => {

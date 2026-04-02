@@ -82,9 +82,13 @@ export function ExecutionJobsPanel({ jobs, onClearHistory, onPollJobs, onRetryJo
                 <div className="mt-2 flex flex-wrap gap-2 text-[11px] uppercase tracking-[0.18em] text-neutral-500">
                   <span>Attempts: {job.polling.attemptCount}</span>
                   <span>Retries: {job.polling.retryCount}</span>
+                  {job.sourceJobId ? <span>Retry of: {job.sourceJobId}</span> : null}
+                  {job.supersededByJobId ? <span>Retried as: {job.supersededByJobId}</span> : null}
                   {job.polling.externalJobId ? <span>Provider job: {job.polling.externalJobId}</span> : null}
                   {job.polling.providerStatus ? <span>Provider status: {job.polling.providerStatus}</span> : null}
+                  {job.polling.resultRetrievalState ? <span>Result retrieval: {job.polling.resultRetrievalState}</span> : null}
                   {job.polling.lastAttemptedAt ? <span>Last poll: {formatTimestamp(job.polling.lastAttemptedAt)}</span> : null}
+                  {job.polling.lastResultRetrievedAt ? <span>Last result fetch: {formatTimestamp(job.polling.lastResultRetrievedAt)}</span> : null}
                   {job.polling.nextSuggestedPollAt ? <span>Next poll: {formatTimestamp(job.polling.nextSuggestedPollAt)}</span> : null}
                 </div>
 
@@ -107,9 +111,10 @@ export function ExecutionJobsPanel({ jobs, onClearHistory, onPollJobs, onRetryJo
                     <button
                       type="button"
                       onClick={() => onRetryJob(job.id)}
+                      disabled={Boolean(job.supersededByJobId) || !job.request}
                       className="rounded-md border border-amber-700 bg-amber-950/30 px-2.5 py-1.5 text-xs text-amber-200 transition hover:bg-amber-950/50"
                     >
-                      Retry Job
+                      {job.supersededByJobId ? "Retry Submitted" : job.request ? "Retry Job" : "Retry Unavailable"}
                     </button>
                   </div>
                 ) : null}

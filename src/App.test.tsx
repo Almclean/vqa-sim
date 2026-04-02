@@ -158,15 +158,21 @@ describe("App", () => {
     expect(screen.getByText(/provider status: submitted/i)).toBeInTheDocument();
   });
 
-  it("maps queued remote jobs through provider-ready before they start running", async () => {
+  it("resumes remote jobs after reload and eventually retrieves completed results", async () => {
     const user = userEvent.setup();
 
-    render(<App />);
+    const { unmount } = render(<App />);
 
     await user.selectOptions(screen.getByLabelText(/execution target/i), "ionq-qpu");
     await user.selectOptions(screen.getByLabelText(/ionq auth mode/i), "server-managed");
     await user.click(screen.getByRole("button", { name: /refresh sampled estimate/i }));
 
+    expect(screen.getByText(/^queued$/i)).toBeInTheDocument();
+
+    unmount();
+    render(<App />);
+
+    expect(screen.getByText(/ionq qpu · shot-sampling/i)).toBeInTheDocument();
     expect(screen.getByText(/^queued$/i)).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /poll jobs/i }));
@@ -181,6 +187,20 @@ describe("App", () => {
     expect(screen.getByText(/provider status: started/i)).toBeInTheDocument();
     expect(screen.getByText(/started execution/i)).toBeInTheDocument();
     expect(screen.getByText(/attempts: 2/i)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /poll jobs/i }));
+
+    expect(screen.getByText(/^running$/i)).toBeInTheDocument();
+    expect(screen.getByText(/provider status: completed/i)).toBeInTheDocument();
+    expect(screen.getByText(/result retrieval: pending/i)).toBeInTheDocument();
+    expect(screen.getByText(/final result payload is not ready yet/i)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /poll jobs/i }));
+
+    expect(screen.getByText(/^completed$/i)).toBeInTheDocument();
+    expect(screen.getByText(/result retrieval: retrieved/i)).toBeInTheDocument();
+    expect(screen.getByText(/retrieved final ionq result payload/i)).toBeInTheDocument();
+    expect(screen.getByText(/total shots used/i)).toBeInTheDocument();
   });
 
   it("persists non-secret backend preferences while keeping IonQ credentials session-scoped", async () => {
