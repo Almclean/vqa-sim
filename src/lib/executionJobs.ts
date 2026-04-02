@@ -3,6 +3,7 @@ import type { ExecutableCircuit } from "./circuitExecutor";
 import { type MoleculeKey } from "../data/molecules";
 import type { Algorithm } from "../types";
 import { getExecutionProviderAdapterForTarget } from "./providerAdapters";
+import { type ResolvedProviderAuth } from "./providerAuth";
 
 export type ExecutionJobStatus = "queued" | "running" | "completed" | "failed";
 
@@ -145,21 +146,37 @@ export const saveExecutionJobs = (jobs: ExecutionJobRecord[]): void => {
   window.localStorage.setItem(EXECUTION_JOBS_STORAGE_KEY, JSON.stringify(jobs.slice(0, MAX_PERSISTED_EXECUTION_JOBS)));
 };
 
-export const submitSamplingExecutionJob = (request: SamplingExecutionJobRequest): ExecutionJobRecord => {
+export const submitSamplingExecutionJob = (
+  request: SamplingExecutionJobRequest,
+  providerAuth: ResolvedProviderAuth,
+): ExecutionJobRecord => {
   const acceptance = canBackendTargetAcceptCircuit(request.targetId, request.circuit);
   if (!acceptance.supported) {
     throw new Error(acceptance.reason ?? `Execution target "${request.targetId}" cannot accept the current circuit.`);
   }
 
   const timestamp = new Date().toISOString();
-  return getExecutionProviderAdapterForTarget(request.targetId).submitSamplingJob(request, timestamp);
+  return getExecutionProviderAdapterForTarget(request.targetId).submitSamplingJob(request, timestamp, providerAuth);
 };
 
-export const pollExecutionJobs = (jobs: ExecutionJobRecord[], nowIso: string = new Date().toISOString()): ExecutionJobRecord[] =>
+export const pollExecutionJobs = (
+  jobs: ExecutionJobRecord[],
+  resolveProviderAuth: (targetId: BackendTargetId) => ResolvedProviderAuth,
+  nowIso: string = new Date().toISOString(),
+): ExecutionJobRecord[] =>
   jobs.map((job) => {
     if (job.queueBehavior !== "provider-queue") return job;
     if (job.status !== "queued" && job.status !== "running") return job;
-    return getExecutionProviderAdapterForTarget(job.targetId).pollJob(job, nowIso);
+
+    try {
+      return getExecutionProviderAdapterForTarget(job.targetId).pollJob(job, nowIso, resolveProviderAuth(job.targetId));
+    } catch (error) {
+      return markExecutionJobFailed(
+        job,
+        error instanceof Error ? error.message : `Unable to poll ${job.targetLabel}.`,
+        nowIso,
+      );
+    }
   });
 
 export const markExecutionJobFailed = (

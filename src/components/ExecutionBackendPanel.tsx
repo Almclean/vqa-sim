@@ -4,12 +4,18 @@ import {
   type BackendTargetId,
   type BackendTargetDescriptor,
 } from "../lib/backendTargets";
+import type { IonQCredentialMode } from "../lib/backendPreferences";
 
 type ExecutionBackendPanelProps = {
   executionTarget: BackendTargetId;
+  ionqCredentialMode: IonQCredentialMode;
   ionqApiKey: string;
+  ionqAuthConfigured: boolean;
+  ionqAuthDetail: string;
   onExecutionTargetChange: (target: BackendTargetId) => void;
+  onIonqCredentialModeChange: (mode: IonQCredentialMode) => void;
   onIonqApiKeyChange: (apiKey: string) => void;
+  onClearIonqApiKey: () => void;
 };
 
 const formatIntentLabel = (intent: BackendTargetDescriptor["supportedIntents"][number]): string => {
@@ -27,9 +33,14 @@ const formatIntentLabel = (intent: BackendTargetDescriptor["supportedIntents"][n
 
 export function ExecutionBackendPanel({
   executionTarget,
+  ionqCredentialMode,
   ionqApiKey,
+  ionqAuthConfigured,
+  ionqAuthDetail,
   onExecutionTargetChange,
+  onIonqCredentialModeChange,
   onIonqApiKeyChange,
+  onClearIonqApiKey,
 }: ExecutionBackendPanelProps): JSX.Element {
   const descriptor = getBackendTargetDescriptor(executionTarget);
   const isRemoteTarget = descriptor.executionMode === "remote-job";
@@ -86,21 +97,57 @@ export function ExecutionBackendPanel({
 
         {descriptor.provider === "ionq" ? (
           <div className="space-y-2 rounded-md border border-neutral-800 bg-neutral-900 p-3">
-            <label className="block text-xs font-medium text-neutral-300" htmlFor="ionq-api-key">
-              IonQ API key
-            </label>
-            <input
-              id="ionq-api-key"
-              type="password"
-              value={ionqApiKey}
-              onChange={(event) => onIonqApiKeyChange(event.target.value)}
-              placeholder="Enter IonQ API key"
-              className="w-full rounded-md border border-neutral-700 bg-neutral-800 px-3 py-2 text-sm text-neutral-100 outline-none transition focus:border-cyan-500"
-            />
+            <div>
+              <label className="mb-1 block text-xs font-medium text-neutral-300" htmlFor="ionq-credential-mode">
+                IonQ auth mode
+              </label>
+              <select
+                id="ionq-credential-mode"
+                value={ionqCredentialMode}
+                onChange={(event) => onIonqCredentialModeChange(event.target.value as IonQCredentialMode)}
+                className="w-full rounded-md border border-neutral-700 bg-neutral-800 px-3 py-2 text-sm outline-none ring-cyan-400 focus:ring-2"
+              >
+                <option value="browser-session">Browser session key</option>
+                <option value="server-managed">Server-managed provider auth</option>
+              </select>
+            </div>
+
+            {ionqCredentialMode === "browser-session" ? (
+              <>
+                <label className="block text-xs font-medium text-neutral-300" htmlFor="ionq-api-key">
+                  IonQ API key
+                </label>
+                <input
+                  id="ionq-api-key"
+                  type="password"
+                  value={ionqApiKey}
+                  onChange={(event) => onIonqApiKeyChange(event.target.value)}
+                  placeholder="Enter IonQ API key for this tab"
+                  className="w-full rounded-md border border-neutral-700 bg-neutral-800 px-3 py-2 text-sm text-neutral-100 outline-none transition focus:border-cyan-500"
+                />
+                <div className="flex items-center justify-between gap-3 text-xs text-neutral-500">
+                  <span>Stored in session storage for this tab only. It is not written to local storage.</span>
+                  <button
+                    type="button"
+                    onClick={onClearIonqApiKey}
+                    className="rounded-md border border-neutral-700 bg-neutral-950 px-2 py-1 text-[11px] uppercase tracking-[0.18em] text-neutral-300 transition hover:bg-neutral-800"
+                  >
+                    Clear Key
+                  </button>
+                </div>
+              </>
+            ) : (
+              <div className="rounded-md border border-neutral-800 bg-neutral-950/70 p-3 text-xs text-neutral-400">
+                Prefer this mode for deployed environments. The browser will not keep a provider secret, and remote execution
+                should flow through a server-side proxy or API route.
+              </div>
+            )}
+
+            <p className="text-xs font-medium text-neutral-300">Provider auth status</p>
             <div className="flex items-center justify-between gap-3 text-xs text-neutral-500">
-              <span>Stored locally in this browser until provider secret handling is added.</span>
-              <span className={ionqApiKey ? "text-emerald-300" : "text-amber-300"}>
-                {ionqApiKey ? "Configured" : "Missing"}
+              <span>{ionqAuthDetail}</span>
+              <span className={ionqAuthConfigured ? "text-emerald-300" : "text-amber-300"}>
+                {ionqAuthConfigured ? "Configured" : "Missing"}
               </span>
             </div>
           </div>
@@ -110,8 +157,9 @@ export function ExecutionBackendPanel({
           <p>Local dense CPU execution completes immediately, while remote targets submit provider-backed jobs into the shared queue.</p>
           {isRemoteTarget ? (
             <p className="mt-2 text-cyan-200/90">
-              Remote provider status mapping is in place, but secure credential handling and full deferred result retrieval are
-              still being tightened. Treat this flow as poll, resume, and revisit rather than a live blocking session.
+              Local development can use a tab-scoped browser session key. Deployed environments should prefer server-managed
+              provider auth so the browser never needs a long-lived secret. Treat remote execution as poll, resume, and revisit
+              rather than a live blocking session.
             </p>
           ) : null}
         </div>

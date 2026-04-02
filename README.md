@@ -107,6 +107,13 @@ Open the app at the URL shown by Vite (typically `http://localhost:5173`).
 bun run build
 ```
 
+### Remote Provider Credentials
+
+- Non-secret backend preferences are stored in browser `localStorage`.
+- Remote provider secrets are not stored in `localStorage`.
+- For local development, IonQ credentials can be entered in browser-session mode and are kept in `sessionStorage` for the current tab only.
+- For deployed environments, prefer server-managed provider auth so the browser never needs a long-lived provider secret.
+
 ## Docker
 
 This repo includes a multi-stage Docker build:

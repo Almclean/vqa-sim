@@ -7,6 +7,23 @@ import {
   setIonQProviderTransport,
   type IonQProviderTransport,
 } from "./providerAdapters";
+import type { ResolvedProviderAuth } from "./providerAuth";
+
+const LOCAL_AUTH: ResolvedProviderAuth = {
+  provider: "local",
+  mode: "not-required",
+};
+
+const IONQ_BROWSER_SESSION_AUTH: ResolvedProviderAuth = {
+  provider: "ionq",
+  mode: "browser-session",
+  apiKey: "test-ionq-key",
+};
+
+const IONQ_SERVER_MANAGED_AUTH: ResolvedProviderAuth = {
+  provider: "ionq",
+  mode: "server-managed",
+};
 
 const makeQaoaRequest = () => ({
   targetId: "dense-cpu" as const,
@@ -42,7 +59,7 @@ describe("providerAdapters", () => {
 
   it("submits local jobs through the local adapter as immediate completions", () => {
     const adapter = getExecutionProviderAdapter("local");
-    const job = adapter.submitSamplingJob(makeQaoaRequest(), "2026-04-02T12:00:00.000Z");
+    const job = adapter.submitSamplingJob(makeQaoaRequest(), "2026-04-02T12:00:00.000Z", LOCAL_AUTH);
 
     expect(job.status).toBe("completed");
     expect(job.queueBehavior).toBe("instant");
@@ -68,11 +85,12 @@ describe("providerAdapters", () => {
     setIonQProviderTransport(transport);
 
     const adapter = getExecutionProviderAdapter("ionq");
-    const job = adapter.submitSamplingJob(makeVqeRequest(), "2026-04-02T12:00:00.000Z");
+    const job = adapter.submitSamplingJob(makeVqeRequest(), "2026-04-02T12:00:00.000Z", IONQ_BROWSER_SESSION_AUTH);
 
     expect(job.status).toBe("queued");
     expect(job.queueBehavior).toBe("provider-queue");
-    expect(job.statusDetail).toBe("IonQ accepted the job.");
+    expect(job.statusDetail).toMatch(/IonQ accepted the job\./);
+    expect(job.statusDetail).toMatch(/browser session/i);
     expect(job.polling.externalJobId).toBe("ionq_job_123");
     expect(job.polling.providerStatus).toBe("submitted");
   });
@@ -99,8 +117,8 @@ describe("providerAdapters", () => {
     setIonQProviderTransport(transport);
 
     const adapter = getExecutionProviderAdapter("ionq");
-    const queuedJob = adapter.submitSamplingJob(makeVqeRequest(), "2026-04-02T12:00:00.000Z");
-    const updatedJob = adapter.pollJob(queuedJob, "2026-04-02T12:30:00.000Z");
+    const queuedJob = adapter.submitSamplingJob(makeVqeRequest(), "2026-04-02T12:00:00.000Z", IONQ_BROWSER_SESSION_AUTH);
+    const updatedJob = adapter.pollJob(queuedJob, "2026-04-02T12:30:00.000Z", IONQ_BROWSER_SESSION_AUTH);
 
     expect(updatedJob.status).toBe("queued");
     expect(updatedJob.statusDetail).toMatch(/has accepted the job/i);
@@ -132,8 +150,8 @@ describe("providerAdapters", () => {
     setIonQProviderTransport(transport);
 
     const adapter = getExecutionProviderAdapter("ionq");
-    const queuedJob = adapter.submitSamplingJob(makeVqeRequest(), "2026-04-02T12:00:00.000Z");
-    const runningJob = adapter.pollJob(queuedJob, "2026-04-02T12:30:00.000Z");
+    const queuedJob = adapter.submitSamplingJob(makeVqeRequest(), "2026-04-02T12:00:00.000Z", IONQ_BROWSER_SESSION_AUTH);
+    const runningJob = adapter.pollJob(queuedJob, "2026-04-02T12:30:00.000Z", IONQ_BROWSER_SESSION_AUTH);
 
     expect(runningJob.status).toBe("running");
     expect(runningJob.startedAt).toBe("2026-04-02T12:30:00.000Z");
@@ -169,8 +187,8 @@ describe("providerAdapters", () => {
     setIonQProviderTransport(transport);
 
     const adapter = getExecutionProviderAdapter("ionq");
-    const queuedJob = adapter.submitSamplingJob(makeVqeRequest(), "2026-04-02T12:00:00.000Z");
-    const completedJob = adapter.pollJob(queuedJob, "2026-04-02T14:30:00.000Z");
+    const queuedJob = adapter.submitSamplingJob(makeVqeRequest(), "2026-04-02T12:00:00.000Z", IONQ_BROWSER_SESSION_AUTH);
+    const completedJob = adapter.pollJob(queuedJob, "2026-04-02T14:30:00.000Z", IONQ_BROWSER_SESSION_AUTH);
 
     expect(completedJob.status).toBe("completed");
     expect(completedJob.completedAt).toBe("2026-04-02T14:30:00.000Z");
@@ -206,13 +224,33 @@ describe("providerAdapters", () => {
     setIonQProviderTransport(transport);
 
     const adapter = getExecutionProviderAdapter("ionq");
-    const queuedJob = adapter.submitSamplingJob(makeVqeRequest(), "2026-04-02T12:00:00.000Z");
-    const failedJob = adapter.pollJob(queuedJob, "2026-04-02T12:45:00.000Z");
+    const queuedJob = adapter.submitSamplingJob(makeVqeRequest(), "2026-04-02T12:00:00.000Z", IONQ_BROWSER_SESSION_AUTH);
+    const failedJob = adapter.pollJob(queuedJob, "2026-04-02T12:45:00.000Z", IONQ_BROWSER_SESSION_AUTH);
 
     expect(failedJob.status).toBe("failed");
     expect(failedJob.statusDetail).toBe("IonQ rejected the job after validation.");
     expect(failedJob.errorMessage).toBe("Unsupported gate set for target backend.");
     expect(failedJob.polling.resumable).toBe(false);
     expect(failedJob.polling.providerStatus).toBe("failed");
+  });
+
+  it("rejects IonQ browser-session submission when the tab has no API key", () => {
+    const adapter = getExecutionProviderAdapter("ionq");
+
+    expect(() =>
+      adapter.submitSamplingJob(makeVqeRequest(), "2026-04-02T12:00:00.000Z", {
+        provider: "ionq",
+        mode: "browser-session",
+        apiKey: "",
+      }),
+    ).toThrow(/requires an api key/i);
+  });
+
+  it("allows server-managed IonQ auth without a browser secret", () => {
+    const adapter = getExecutionProviderAdapter("ionq");
+    const job = adapter.submitSamplingJob(makeVqeRequest(), "2026-04-02T12:00:00.000Z", IONQ_SERVER_MANAGED_AUTH);
+
+    expect(job.status).toBe("queued");
+    expect(job.statusDetail).toMatch(/server-side execution layer/i);
   });
 });

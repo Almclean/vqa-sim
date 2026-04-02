@@ -1,15 +1,17 @@
 import { getBackendTargetDescriptor, type BackendTargetId } from "./backendTargets";
 
+export type IonQCredentialMode = "browser-session" | "server-managed";
+
 export type BackendPreferences = {
   executionTarget: BackendTargetId;
-  ionqApiKey: string;
+  ionqCredentialMode: IonQCredentialMode;
 };
 
 const BACKEND_PREFERENCES_STORAGE_KEY = "vqa-sim:backend-preferences";
 
 export const DEFAULT_BACKEND_PREFERENCES: BackendPreferences = {
   executionTarget: "dense-cpu",
-  ionqApiKey: "",
+  ionqCredentialMode: "browser-session",
 };
 
 const isValidBackendTargetId = (value: unknown): value is BackendTargetId => {
@@ -23,6 +25,9 @@ const isValidBackendTargetId = (value: unknown): value is BackendTargetId => {
   }
 };
 
+const isValidIonQCredentialMode = (value: unknown): value is IonQCredentialMode =>
+  value === "browser-session" || value === "server-managed";
+
 export const loadBackendPreferences = (): BackendPreferences => {
   if (typeof window === "undefined") return DEFAULT_BACKEND_PREFERENCES;
 
@@ -35,7 +40,9 @@ export const loadBackendPreferences = (): BackendPreferences => {
       executionTarget: isValidBackendTargetId(parsed.executionTarget)
         ? parsed.executionTarget
         : DEFAULT_BACKEND_PREFERENCES.executionTarget,
-      ionqApiKey: typeof parsed.ionqApiKey === "string" ? parsed.ionqApiKey : DEFAULT_BACKEND_PREFERENCES.ionqApiKey,
+      ionqCredentialMode: isValidIonQCredentialMode(parsed.ionqCredentialMode)
+        ? parsed.ionqCredentialMode
+        : DEFAULT_BACKEND_PREFERENCES.ionqCredentialMode,
     };
   } catch {
     return DEFAULT_BACKEND_PREFERENCES;

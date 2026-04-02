@@ -17,6 +17,7 @@ import { sampleQaoaMeasurementEstimate, sampleVqeMeasurementEstimate } from "./l
 afterEach(() => {
   vi.clearAllMocks();
   window.localStorage.clear();
+  window.sessionStorage.clear();
 });
 
 describe("App", () => {
@@ -147,10 +148,11 @@ describe("App", () => {
     render(<App />);
 
     await user.selectOptions(screen.getByLabelText(/execution target/i), "ionq-simulator");
+    await user.selectOptions(screen.getByLabelText(/ionq auth mode/i), "server-managed");
     await user.click(screen.getByRole("button", { name: /refresh sampled estimate/i }));
 
     expect(sampleQaoaMeasurementEstimate).not.toHaveBeenCalled();
-    expect(screen.getAllByText(/provider queue/i)).toHaveLength(2);
+    expect(screen.getAllByText(/server-side execution layer/i)).toHaveLength(2);
     expect(screen.getByText(/ionq simulator · shot-sampling/i)).toBeInTheDocument();
     expect(screen.getByText(/^queued$/i)).toBeInTheDocument();
     expect(screen.getByText(/provider status: submitted/i)).toBeInTheDocument();
@@ -162,6 +164,7 @@ describe("App", () => {
     render(<App />);
 
     await user.selectOptions(screen.getByLabelText(/execution target/i), "ionq-qpu");
+    await user.selectOptions(screen.getByLabelText(/ionq auth mode/i), "server-managed");
     await user.click(screen.getByRole("button", { name: /refresh sampled estimate/i }));
 
     expect(screen.getByText(/^queued$/i)).toBeInTheDocument();
@@ -180,23 +183,35 @@ describe("App", () => {
     expect(screen.getByText(/attempts: 2/i)).toBeInTheDocument();
   });
 
-  it("persists backend target selection and IonQ credentials locally", async () => {
+  it("persists non-secret backend preferences while keeping IonQ credentials session-scoped", async () => {
     const user = userEvent.setup();
 
     const { unmount } = render(<App />);
 
     await user.selectOptions(screen.getByLabelText(/execution target/i), "ionq-simulator");
+    await user.selectOptions(screen.getByLabelText(/ionq auth mode/i), "server-managed");
+    await user.selectOptions(screen.getByLabelText(/ionq auth mode/i), "browser-session");
 
     expect(screen.getByLabelText(/execution target/i)).toHaveValue("ionq-simulator");
     expect(screen.getByLabelText(/ionq api key/i)).toBeInTheDocument();
-    expect(screen.getByText(/poll, resume, and revisit/i)).toBeInTheDocument();
+    expect(screen.getByText(/tab-scoped browser session key/i)).toBeInTheDocument();
 
     await user.type(screen.getByLabelText(/ionq api key/i), "test-ionq-key");
+
+    expect(window.localStorage.getItem("vqa-sim:backend-preferences")).toBe(
+      JSON.stringify({
+        executionTarget: "ionq-simulator",
+        ionqCredentialMode: "browser-session",
+      }),
+    );
+    expect(window.localStorage.getItem("vqa-sim:provider-session-credentials")).toBeNull();
+    expect(window.sessionStorage.getItem("vqa-sim:provider-session-credentials")).toContain("test-ionq-key");
 
     unmount();
     render(<App />);
 
     expect(screen.getByLabelText(/execution target/i)).toHaveValue("ionq-simulator");
+    expect(screen.getByLabelText(/ionq auth mode/i)).toHaveValue("browser-session");
     expect(screen.getByLabelText(/ionq api key/i)).toHaveValue("test-ionq-key");
   });
 });

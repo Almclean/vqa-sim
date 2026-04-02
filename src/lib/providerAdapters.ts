@@ -14,11 +14,16 @@ import type {
   SamplingExecutionJobRequest,
   SamplingExecutionJobResult,
 } from "./executionJobs";
+import type { ResolvedProviderAuth } from "./providerAuth";
 
 export interface ExecutionProviderAdapter {
   readonly provider: BackendProvider;
-  submitSamplingJob(request: SamplingExecutionJobRequest, submittedAt: string): ExecutionJobRecord;
-  pollJob(job: ExecutionJobRecord, nowIso: string): ExecutionJobRecord;
+  submitSamplingJob(
+    request: SamplingExecutionJobRequest,
+    submittedAt: string,
+    providerAuth: ResolvedProviderAuth,
+  ): ExecutionJobRecord;
+  pollJob(job: ExecutionJobRecord, nowIso: string, providerAuth: ResolvedProviderAuth): ExecutionJobRecord;
 }
 
 export type IonQProviderJobStatus = "submitted" | "ready" | "started" | "completed" | "failed" | "canceled";
@@ -86,9 +91,32 @@ const makeQueuedPollingState = (submittedAt: string, externalJobId?: string): Ex
 const makeExecutionJobId = (): string =>
   `job_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 
+const assertProviderMatchesAdapter = (
+  providerAuth: ResolvedProviderAuth,
+  expectedProvider: BackendProvider,
+): ResolvedProviderAuth => {
+  if (providerAuth.provider !== expectedProvider) {
+    throw new Error(`Execution auth for provider "${providerAuth.provider}" cannot be used with "${expectedProvider}".`);
+  }
+  return providerAuth;
+};
+
+const assertIonQProviderAuth = (
+  providerAuth: ResolvedProviderAuth,
+): Extract<ResolvedProviderAuth, { provider: "ionq" }> => {
+  const ionqAuth = assertProviderMatchesAdapter(providerAuth, "ionq") as Extract<ResolvedProviderAuth, { provider: "ionq" }>;
+
+  if (ionqAuth.mode === "browser-session" && !ionqAuth.apiKey) {
+    throw new Error("IonQ browser-session mode requires an API key for this tab before remote execution can start.");
+  }
+
+  return ionqAuth;
+};
+
 const localProviderAdapter: ExecutionProviderAdapter = {
   provider: "local",
-  submitSamplingJob(request, submittedAt) {
+  submitSamplingJob(request, submittedAt, providerAuth) {
+    assertProviderMatchesAdapter(providerAuth, "local");
     const descriptor = getBackendTargetDescriptor(request.targetId);
     const result = runLocalSamplingJob(request);
 
@@ -114,7 +142,8 @@ const localProviderAdapter: ExecutionProviderAdapter = {
       result,
     };
   },
-  pollJob(job) {
+  pollJob(job, _nowIso, providerAuth) {
+    assertProviderMatchesAdapter(providerAuth, "local");
     return job;
   },
 };
@@ -228,9 +257,17 @@ const mapIonQJobStatusToExecutionRecord = (
 
 const ionqProviderAdapter: ExecutionProviderAdapter = {
   provider: "ionq",
-  submitSamplingJob(request, submittedAt) {
+  submitSamplingJob(request, submittedAt, providerAuth) {
+    const resolvedAuth = assertIonQProviderAuth(providerAuth);
     const descriptor = getBackendTargetDescriptor(request.targetId);
     const submission = ionqTransport.submitSamplingJob(request, submittedAt);
+    const authSuffix =
+      resolvedAuth.mode === "server-managed"
+        ? "Provider auth will be supplied by the server-side execution layer."
+        : "Provider auth is available from this browser session.";
+    const statusDetail = submission.statusDetail
+      ? `${submission.statusDetail} ${authSuffix}`
+      : `${descriptor.label} is queued at the provider. ${authSuffix}`;
 
     return {
       id: makeExecutionJobId(),
@@ -243,11 +280,12 @@ const ionqProviderAdapter: ExecutionProviderAdapter = {
       updatedAt: submittedAt,
       shots: request.shots,
       queueBehavior: "provider-queue",
-      statusDetail: submission.statusDetail ?? `${descriptor.label} is queued at the provider.`,
+      statusDetail,
       polling: makeQueuedPollingState(submittedAt, submission.jobId),
     };
   },
-  pollJob(job, nowIso) {
+  pollJob(job, nowIso, providerAuth) {
+    assertIonQProviderAuth(providerAuth);
     if (job.status !== "queued" && job.status !== "running") {
       return job;
     }
