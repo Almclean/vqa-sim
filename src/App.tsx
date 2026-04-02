@@ -26,11 +26,18 @@ import { buildQaoaCircuit, buildVqeCircuit } from "./lib/circuitBuilders";
 import {
   loadExecutionJobs,
   pollExecutionJobs,
-  retryExecutionJob,
+  retryExecutionJobInHistory,
   saveExecutionJobs,
   submitSamplingExecutionJob,
   type ExecutionJobRecord,
 } from "./lib/executionJobs";
+import {
+  getProviderAuthConfigurationStatus,
+  loadProviderSessionCredentials,
+  resolveProviderAuthForTarget,
+  saveProviderSessionCredentials,
+  type ProviderSessionCredentials,
+} from "./lib/providerAuth";
 import {
   edgeKey,
   filterEdgesForNodeCount,
@@ -110,6 +117,9 @@ export default function App(): JSX.Element {
   const [algorithm, setAlgorithm] = useState<Algorithm>("qaoa");
   const [circuitMode, setCircuitMode] = useState<CircuitMode>("logical");
   const [backendPreferences, setBackendPreferences] = useState<BackendPreferences>(() => loadBackendPreferences());
+  const [providerSessionCredentials, setProviderSessionCredentials] = useState<ProviderSessionCredentials>(() =>
+    loadProviderSessionCredentials(),
+  );
   const [executionJobs, setExecutionJobs] = useState<ExecutionJobRecord[]>(() => loadExecutionJobs());
 
   const [depth, setDepth] = useState<number>(2);
@@ -156,6 +166,14 @@ export default function App(): JSX.Element {
     () => getBackendTargetDescriptor(backendPreferences.executionTarget),
     [backendPreferences.executionTarget],
   );
+  const selectedExecutionTargetAuth = useMemo(
+    () => resolveProviderAuthForTarget(backendPreferences.executionTarget, backendPreferences, providerSessionCredentials),
+    [backendPreferences, providerSessionCredentials],
+  );
+  const selectedExecutionTargetAuthStatus = useMemo(
+    () => getProviderAuthConfigurationStatus(selectedExecutionTargetAuth),
+    [selectedExecutionTargetAuth],
+  );
 
   const currentMetric = useMemo(() => {
     if (algorithm === "qaoa") {
@@ -170,6 +188,8 @@ export default function App(): JSX.Element {
     sampledMetricDelta !== null && Math.abs(currentMetric) > 1e-9
       ? (Math.abs(sampledMetricDelta) / Math.abs(currentMetric)) * 100
       : null;
+  const resolveExecutionAuth = (targetId: typeof backendPreferences.executionTarget) =>
+    resolveProviderAuthForTarget(targetId, backendPreferences, providerSessionCredentials);
 
   useEffect(() => {
     setRunning(false);
@@ -215,6 +235,10 @@ export default function App(): JSX.Element {
   useEffect(() => {
     saveBackendPreferences(backendPreferences);
   }, [backendPreferences]);
+
+  useEffect(() => {
+    saveProviderSessionCredentials(providerSessionCredentials);
+  }, [providerSessionCredentials]);
 
   useEffect(() => {
     saveExecutionJobs(executionJobs);
@@ -412,7 +436,7 @@ export default function App(): JSX.Element {
               edges: effectiveEdges,
               gammas,
               betas,
-            })
+            }, selectedExecutionTargetAuth)
           : submitSamplingExecutionJob({
               targetId: backendPreferences.executionTarget,
               circuit: currentExecutableCircuit,
@@ -420,7 +444,7 @@ export default function App(): JSX.Element {
               shots: measurementShots,
               thetas,
               molecule,
-            });
+            }, selectedExecutionTargetAuth);
 
       setExecutionJobs((prev) => [job, ...prev].slice(0, 24));
 
@@ -456,29 +480,44 @@ export default function App(): JSX.Element {
           <aside className="space-y-4 rounded-xl border border-neutral-800 bg-neutral-900/80 p-4">
             <ExecutionBackendPanel
               executionTarget={backendPreferences.executionTarget}
-              ionqApiKey={backendPreferences.ionqApiKey}
+              ionqCredentialMode={backendPreferences.ionqCredentialMode}
+              ionqApiKey={providerSessionCredentials.ionqApiKey}
+              ionqAuthConfigured={selectedExecutionTargetAuthStatus.configured}
+              ionqAuthDetail={selectedExecutionTargetAuthStatus.detail}
               onExecutionTargetChange={(executionTarget) =>
                 setBackendPreferences((prev) => ({
                   ...prev,
                   executionTarget,
                 }))
               }
-              onIonqApiKeyChange={(ionqApiKey) =>
+              onIonqCredentialModeChange={(ionqCredentialMode) =>
                 setBackendPreferences((prev) => ({
                   ...prev,
+                  ionqCredentialMode,
+                }))
+              }
+              onIonqApiKeyChange={(ionqApiKey) =>
+                setProviderSessionCredentials((prev) => ({
+                  ...prev,
                   ionqApiKey,
+                }))
+              }
+              onClearIonqApiKey={() =>
+                setProviderSessionCredentials((prev) => ({
+                  ...prev,
+                  ionqApiKey: "",
                 }))
               }
             />
             <ExecutionJobsPanel
               jobs={executionJobs}
               onClearHistory={() => setExecutionJobs([])}
-              onPollJobs={() => setExecutionJobs((prev) => pollExecutionJobs(prev))}
-              onRetryJob={(jobId) =>
+              onPollJobs={() =>
                 setExecutionJobs((prev) =>
-                  prev.map((job) => (job.id === jobId && job.status === "failed" ? retryExecutionJob(job) : job)),
+                  pollExecutionJobs(prev, resolveExecutionAuth),
                 )
               }
+              onRetryJob={(jobId) => setExecutionJobs((prev) => retryExecutionJobInHistory(prev, jobId, resolveExecutionAuth))}
             />
 
             <TargetDomainWidget
