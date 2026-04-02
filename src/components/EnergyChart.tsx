@@ -9,6 +9,7 @@ type EnergyChartProps = {
   costHistory: number[];
   currentMetric: number;
   iteration: number;
+  variant?: "standalone" | "embedded";
 };
 
 export function EnergyChart({
@@ -18,6 +19,7 @@ export function EnergyChart({
   costHistory,
   currentMetric,
   iteration,
+  variant = "standalone",
 }: EnergyChartProps): JSX.Element {
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
 
@@ -66,9 +68,13 @@ export function EnergyChart({
   };
 
   const metricLabel = algorithm === "vqe" ? "ENERGY (HARTREES)" : "COST (EXPECTATION VAL)";
+  const containerClassName =
+    variant === "embedded"
+      ? "rounded-xl border border-neutral-800 bg-neutral-950/50 p-4"
+      : "rounded-xl border border-neutral-800 bg-neutral-900/80 p-4";
 
   return (
-    <section className="rounded-xl border border-neutral-800 bg-neutral-900/80 p-4">
+    <section className={containerClassName}>
       <div className="mb-3 flex items-center justify-between">
         <h2 className="text-sm font-semibold uppercase tracking-widest text-neutral-300">Energy Landscape</h2>
         <div className="flex flex-col items-end text-xs text-neutral-400">

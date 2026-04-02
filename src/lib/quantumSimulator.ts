@@ -1,12 +1,12 @@
-type Complex = { re: number; im: number };
+export type ComplexAmplitude = { re: number; im: number };
 
-const cAdd = (a: Complex, b: Complex): Complex => ({ re: a.re + b.re, im: a.im + b.im });
-const cMul = (a: Complex, b: Complex): Complex => ({
+const cAdd = (a: ComplexAmplitude, b: ComplexAmplitude): ComplexAmplitude => ({ re: a.re + b.re, im: a.im + b.im });
+const cMul = (a: ComplexAmplitude, b: ComplexAmplitude): ComplexAmplitude => ({
   re: a.re * b.re - a.im * b.im,
   im: a.re * b.im + a.im * b.re,
 });
-const cScale = (a: Complex, x: number): Complex => ({ re: a.re * x, im: a.im * x });
-const cProb = (a: Complex): number => a.re * a.re + a.im * a.im;
+const cScale = (a: ComplexAmplitude, x: number): ComplexAmplitude => ({ re: a.re * x, im: a.im * x });
+const cProb = (a: ComplexAmplitude): number => a.re * a.re + a.im * a.im;
 
 const assertValidQubitIndex = (nQubits: number, qubit: number): void => {
   if (!Number.isInteger(qubit) || qubit < 0 || qubit >= nQubits) {
@@ -17,7 +17,7 @@ const assertValidQubitIndex = (nQubits: number, qubit: number): void => {
 export class QuantumSimulator {
   readonly nQubits: number;
   readonly dim: number;
-  state: Complex[];
+  state: ComplexAmplitude[];
 
   constructor(nQubits: number) {
     if (!Number.isInteger(nQubits) || nQubits < 1) {
@@ -36,10 +36,10 @@ export class QuantumSimulator {
 
   private applySingleQubit(
     qubit: number,
-    m00: Complex,
-    m01: Complex,
-    m10: Complex,
-    m11: Complex,
+    m00: ComplexAmplitude,
+    m01: ComplexAmplitude,
+    m10: ComplexAmplitude,
+    m11: ComplexAmplitude,
   ): void {
     assertValidQubitIndex(this.nQubits, qubit);
     const bit = 1 << qubit;
@@ -76,7 +76,7 @@ export class QuantumSimulator {
     const bitA = 1 << qa;
     const bitB = 1 << qb;
     const c = Math.cos(theta / 2);
-    const minusIS: Complex = { re: 0, im: -Math.sin(theta / 2) };
+    const minusIS: ComplexAmplitude = { re: 0, im: -Math.sin(theta / 2) };
 
     for (let i = 0; i < this.dim; i += 1) {
       if ((i & bitA) !== 0 || (i & bitB) !== 0) continue;
