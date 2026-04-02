@@ -107,11 +107,11 @@ export function ExecutionBackendPanel({
         ) : null}
 
         <div className="rounded-md border border-cyan-900/60 bg-cyan-950/20 p-3 text-xs text-cyan-100">
-          <p>Preview execution still runs on the local dense CPU simulator until provider adapters are implemented.</p>
+          <p>Local dense CPU execution completes immediately, while remote targets submit provider-backed jobs into the shared queue.</p>
           {isRemoteTarget ? (
             <p className="mt-2 text-cyan-200/90">
-              Remote targets will submit queue-backed jobs. Results may return much later, so the future execution flow should
-              assume polling, resume, and revisit rather than a live blocking session.
+              Remote provider status mapping is in place, but secure credential handling and full deferred result retrieval are
+              still being tightened. Treat this flow as poll, resume, and revisit rather than a live blocking session.
             </p>
           ) : null}
         </div>

@@ -41,6 +41,7 @@ export type ExecutionPollingState = {
   lastAttemptedAt?: string;
   nextSuggestedPollAt?: string;
   externalJobId?: string;
+  providerStatus?: string;
 };
 
 export type ExecutionJobRecord = {
@@ -115,6 +116,7 @@ const normalizeExecutionJobRecord = (job: Partial<ExecutionJobRecord>): Executio
       lastAttemptedAt: polling.lastAttemptedAt,
       nextSuggestedPollAt: polling.nextSuggestedPollAt,
       externalJobId: polling.externalJobId,
+      providerStatus: typeof polling.providerStatus === "string" ? polling.providerStatus : undefined,
     },
     result: job.result,
     errorMessage: job.errorMessage,
@@ -196,5 +198,6 @@ export const retryExecutionJob = (
     resumable: true,
     nextSuggestedPollAt: addMinutesToIsoTimestamp(retriedAt, 15),
     externalJobId: undefined,
+    providerStatus: undefined,
   },
 });

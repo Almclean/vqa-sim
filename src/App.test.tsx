@@ -150,12 +150,13 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: /refresh sampled estimate/i }));
 
     expect(sampleQaoaMeasurementEstimate).not.toHaveBeenCalled();
-    expect(screen.getAllByText(/queued remote target/i)).toHaveLength(2);
+    expect(screen.getAllByText(/provider queue/i)).toHaveLength(2);
     expect(screen.getByText(/ionq simulator · shot-sampling/i)).toBeInTheDocument();
     expect(screen.getByText(/^queued$/i)).toBeInTheDocument();
+    expect(screen.getByText(/provider status: submitted/i)).toBeInTheDocument();
   });
 
-  it("polls queued remote jobs into a running state", async () => {
+  it("maps queued remote jobs through provider-ready before they start running", async () => {
     const user = userEvent.setup();
 
     render(<App />);
@@ -167,9 +168,16 @@ describe("App", () => {
 
     await user.click(screen.getByRole("button", { name: /poll jobs/i }));
 
+    expect(screen.getByText(/^queued$/i)).toBeInTheDocument();
+    expect(screen.getByText(/provider status: ready/i)).toBeInTheDocument();
+    expect(screen.getByText(/waiting for execution/i)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /poll jobs/i }));
+
     expect(screen.getByText(/^running$/i)).toBeInTheDocument();
-    expect(screen.getByText(/acknowledged the job/i)).toBeInTheDocument();
-    expect(screen.getByText(/attempts: 1/i)).toBeInTheDocument();
+    expect(screen.getByText(/provider status: started/i)).toBeInTheDocument();
+    expect(screen.getByText(/started execution/i)).toBeInTheDocument();
+    expect(screen.getByText(/attempts: 2/i)).toBeInTheDocument();
   });
 
   it("persists backend target selection and IonQ credentials locally", async () => {
@@ -181,7 +189,7 @@ describe("App", () => {
 
     expect(screen.getByLabelText(/execution target/i)).toHaveValue("ionq-simulator");
     expect(screen.getByLabelText(/ionq api key/i)).toBeInTheDocument();
-    expect(screen.getByText(/results may return much later/i)).toBeInTheDocument();
+    expect(screen.getByText(/poll, resume, and revisit/i)).toBeInTheDocument();
 
     await user.type(screen.getByLabelText(/ionq api key/i), "test-ionq-key");
 

@@ -21,6 +21,30 @@ export interface ExecutionProviderAdapter {
   pollJob(job: ExecutionJobRecord, nowIso: string): ExecutionJobRecord;
 }
 
+export type IonQProviderJobStatus = "submitted" | "ready" | "started" | "completed" | "failed" | "canceled";
+
+export type IonQSubmissionResponse = {
+  provider: "ionq";
+  jobId: string;
+  status: Exclude<IonQProviderJobStatus, "completed" | "failed" | "canceled">;
+  statusDetail?: string;
+};
+
+export type IonQJobStatusResponse = {
+  provider: "ionq";
+  jobId: string;
+  status: IonQProviderJobStatus;
+  statusDetail?: string;
+  result?: SamplingExecutionJobResult;
+  errorMessage?: string;
+};
+
+export interface IonQProviderTransport {
+  readonly provider: "ionq";
+  submitSamplingJob(request: SamplingExecutionJobRequest, submittedAt: string): IonQSubmissionResponse;
+  getJobStatus(job: ExecutionJobRecord, polledAt: string): IonQJobStatusResponse;
+}
+
 const addMinutesToIsoTimestamp = (timestamp: string, minutes: number): string => {
   const parsed = new Date(timestamp);
   parsed.setMinutes(parsed.getMinutes() + minutes);
@@ -50,12 +74,17 @@ const runLocalSamplingJob = (request: SamplingExecutionJobRequest): SamplingExec
   return toSamplingJobResult(sampleVqeMeasurementEstimate(request.thetas, request.molecule, request.shots, "dense-cpu"));
 };
 
-const makeQueuedPollingState = (submittedAt: string): ExecutionPollingState => ({
+const makeQueuedPollingState = (submittedAt: string, externalJobId?: string): ExecutionPollingState => ({
   attemptCount: 0,
   retryCount: 0,
   resumable: true,
   nextSuggestedPollAt: addMinutesToIsoTimestamp(submittedAt, 15),
+  externalJobId,
+  providerStatus: "submitted",
 });
+
+const makeExecutionJobId = (): string =>
+  `job_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 
 const localProviderAdapter: ExecutionProviderAdapter = {
   provider: "local",
@@ -64,7 +93,7 @@ const localProviderAdapter: ExecutionProviderAdapter = {
     const result = runLocalSamplingJob(request);
 
     return {
-      id: `job_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+      id: makeExecutionJobId(),
       targetId: request.targetId,
       targetLabel: descriptor.label,
       algorithm: request.algorithm,
@@ -90,13 +119,121 @@ const localProviderAdapter: ExecutionProviderAdapter = {
   },
 };
 
+const defaultIonQTransport: IonQProviderTransport = {
+  provider: "ionq",
+  submitSamplingJob(_request, submittedAt) {
+    return {
+      provider: "ionq",
+      jobId: `ionq_${submittedAt.replace(/[^0-9]/g, "").slice(-12)}`,
+      status: "submitted",
+      statusDetail: "IonQ accepted the remote job and placed it in the provider queue.",
+    };
+  },
+  getJobStatus(job, polledAt) {
+    if (job.polling.attemptCount === 0) {
+      return {
+        provider: "ionq",
+        jobId: job.polling.externalJobId ?? `ionq_${job.id}`,
+        status: "ready",
+        statusDetail: "IonQ has acknowledged the job and it is waiting for execution.",
+      };
+    }
+
+    return {
+      provider: "ionq",
+      jobId: job.polling.externalJobId ?? `ionq_${job.id}`,
+      status: "started",
+      statusDetail: `IonQ reports the job started execution as of ${new Date(polledAt).toLocaleString()}.`,
+    };
+  },
+};
+
+let ionqTransport: IonQProviderTransport = defaultIonQTransport;
+
+const mapIonQJobStatusToExecutionRecord = (
+  job: ExecutionJobRecord,
+  response: IonQJobStatusResponse,
+  polledAt: string,
+): ExecutionJobRecord => {
+  const basePollingState: ExecutionPollingState = {
+    ...job.polling,
+    attemptCount: job.polling.attemptCount + 1,
+    lastAttemptedAt: polledAt,
+    nextSuggestedPollAt: undefined,
+    externalJobId: response.jobId,
+    providerStatus: response.status,
+  };
+
+  switch (response.status) {
+    case "submitted":
+    case "ready":
+      return {
+        ...job,
+        status: "queued",
+        updatedAt: polledAt,
+        statusDetail: response.statusDetail ?? `${job.targetLabel} is queued at the provider.`,
+        polling: {
+          ...basePollingState,
+          resumable: true,
+          nextSuggestedPollAt: addMinutesToIsoTimestamp(polledAt, 30),
+        },
+      };
+    case "started":
+      return {
+        ...job,
+        status: "running",
+        updatedAt: polledAt,
+        startedAt: job.startedAt ?? polledAt,
+        statusDetail: response.statusDetail ?? `${job.targetLabel} is running remotely.`,
+        polling: {
+          ...basePollingState,
+          resumable: true,
+          nextSuggestedPollAt: addMinutesToIsoTimestamp(polledAt, 120),
+        },
+      };
+    case "completed":
+      return {
+        ...job,
+        status: "completed",
+        updatedAt: polledAt,
+        startedAt: job.startedAt ?? polledAt,
+        completedAt: polledAt,
+        statusDetail: response.statusDetail ?? `${job.targetLabel} completed remotely.`,
+        polling: {
+          ...basePollingState,
+          resumable: false,
+        },
+        result: response.result ?? job.result,
+        errorMessage: undefined,
+      };
+    case "failed":
+    case "canceled":
+      return {
+        ...job,
+        status: "failed",
+        updatedAt: polledAt,
+        statusDetail: response.statusDetail ?? `${job.targetLabel} failed remotely.`,
+        polling: {
+          ...basePollingState,
+          resumable: false,
+        },
+        errorMessage: response.errorMessage ?? `${job.targetLabel} returned provider status "${response.status}".`,
+      };
+    default: {
+      const exhaustiveCheck: never = response.status;
+      return exhaustiveCheck;
+    }
+  }
+};
+
 const ionqProviderAdapter: ExecutionProviderAdapter = {
   provider: "ionq",
   submitSamplingJob(request, submittedAt) {
     const descriptor = getBackendTargetDescriptor(request.targetId);
+    const submission = ionqTransport.submitSamplingJob(request, submittedAt);
 
     return {
-      id: `job_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+      id: makeExecutionJobId(),
       targetId: request.targetId,
       targetLabel: descriptor.label,
       algorithm: request.algorithm,
@@ -106,8 +243,8 @@ const ionqProviderAdapter: ExecutionProviderAdapter = {
       updatedAt: submittedAt,
       shots: request.shots,
       queueBehavior: "provider-queue",
-      statusDetail: `${descriptor.label} is modeled as a queued remote target. Polling and result retrieval are not implemented yet.`,
-      polling: makeQueuedPollingState(submittedAt),
+      statusDetail: submission.statusDetail ?? `${descriptor.label} is queued at the provider.`,
+      polling: makeQueuedPollingState(submittedAt, submission.jobId),
     };
   },
   pollJob(job, nowIso) {
@@ -115,32 +252,8 @@ const ionqProviderAdapter: ExecutionProviderAdapter = {
       return job;
     }
 
-    const nextAttemptCount = job.polling.attemptCount + 1;
-    const nextPollingState: ExecutionPollingState = {
-      ...job.polling,
-      attemptCount: nextAttemptCount,
-      lastAttemptedAt: nowIso,
-      nextSuggestedPollAt: addMinutesToIsoTimestamp(nowIso, job.status === "queued" ? 30 : 120),
-      externalJobId: job.polling.externalJobId ?? `remote_${job.id}`,
-    };
-
-    if (job.status === "queued") {
-      return {
-        ...job,
-        status: "running",
-        updatedAt: nowIso,
-        startedAt: job.startedAt ?? nowIso,
-        statusDetail: `${job.targetLabel} acknowledged the job. Continue polling later for completion.`,
-        polling: nextPollingState,
-      };
-    }
-
-    return {
-      ...job,
-      updatedAt: nowIso,
-      statusDetail: `${job.targetLabel} is still running remotely. Last checked at ${new Date(nowIso).toLocaleString()}.`,
-      polling: nextPollingState,
-    };
+    const response = ionqTransport.getJobStatus(job, nowIso);
+    return mapIonQJobStatusToExecutionRecord(job, response, nowIso);
   },
 };
 
@@ -154,3 +267,11 @@ export const getExecutionProviderAdapter = (provider: BackendProvider): Executio
 
 export const getExecutionProviderAdapterForTarget = (targetId: BackendTargetId): ExecutionProviderAdapter =>
   getExecutionProviderAdapter(getBackendTargetDescriptor(targetId).provider);
+
+export const setIonQProviderTransport = (transport: IonQProviderTransport): void => {
+  ionqTransport = transport;
+};
+
+export const resetIonQProviderTransport = (): void => {
+  ionqTransport = defaultIonQTransport;
+};

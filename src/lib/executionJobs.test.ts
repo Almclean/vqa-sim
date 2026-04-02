@@ -43,9 +43,10 @@ describe("executionJobs", () => {
     expect(job.status).toBe("queued");
     expect(job.queueBehavior).toBe("provider-queue");
     expect(job.result).toBeUndefined();
-    expect(job.statusDetail).toMatch(/queued remote target/i);
+    expect(job.statusDetail).toMatch(/provider queue/i);
     expect(job.polling.attemptCount).toBe(0);
     expect(job.polling.resumable).toBe(true);
+    expect(job.polling.providerStatus).toBe("submitted");
   });
 
   it("persists and restores execution job history", () => {
@@ -101,10 +102,11 @@ describe("executionJobs", () => {
       retryCount: 0,
       resumable: true,
       nextSuggestedPollAt: "2026-04-02T00:15:00.000Z",
+      providerStatus: undefined,
     });
   });
 
-  it("advances resumable remote jobs from queued to running when polled", () => {
+  it("maps resumable remote jobs through queued provider status before they start running", () => {
     const circuit = buildVqeExecutionCircuit([]);
     const queuedJob = submitSamplingExecutionJob({
       targetId: "ionq-qpu",
@@ -115,12 +117,16 @@ describe("executionJobs", () => {
       molecule: "H2_0.74",
     });
 
-    const [runningJob] = pollExecutionJobs([queuedJob], "2026-04-02T12:00:00.000Z");
+    const [readyJob] = pollExecutionJobs([queuedJob], "2026-04-02T12:00:00.000Z");
+    const [runningJob] = pollExecutionJobs([readyJob!], "2026-04-02T13:00:00.000Z");
 
+    expect(readyJob?.status).toBe("queued");
+    expect(readyJob?.polling.providerStatus).toBe("ready");
     expect(runningJob?.status).toBe("running");
-    expect(runningJob?.polling.attemptCount).toBe(1);
-    expect(runningJob?.polling.lastAttemptedAt).toBe("2026-04-02T12:00:00.000Z");
-    expect(runningJob?.polling.externalJobId).toMatch(/^remote_/);
+    expect(runningJob?.polling.attemptCount).toBe(2);
+    expect(runningJob?.polling.lastAttemptedAt).toBe("2026-04-02T13:00:00.000Z");
+    expect(runningJob?.polling.externalJobId).toMatch(/^ionq_/);
+    expect(runningJob?.polling.providerStatus).toBe("started");
   });
 
   it("can mark running jobs as failed and retry them", () => {
@@ -144,6 +150,7 @@ describe("executionJobs", () => {
     expect(retriedJob.polling.retryCount).toBe(1);
     expect(retriedJob.errorMessage).toBeUndefined();
     expect(retriedJob.polling.attemptCount).toBe(0);
+    expect(retriedJob.polling.providerStatus).toBeUndefined();
     expect(retriedJob.statusDetail).toMatch(/re-queued/i);
   });
 });

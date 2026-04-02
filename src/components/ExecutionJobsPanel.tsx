@@ -82,6 +82,8 @@ export function ExecutionJobsPanel({ jobs, onClearHistory, onPollJobs, onRetryJo
                 <div className="mt-2 flex flex-wrap gap-2 text-[11px] uppercase tracking-[0.18em] text-neutral-500">
                   <span>Attempts: {job.polling.attemptCount}</span>
                   <span>Retries: {job.polling.retryCount}</span>
+                  {job.polling.externalJobId ? <span>Provider job: {job.polling.externalJobId}</span> : null}
+                  {job.polling.providerStatus ? <span>Provider status: {job.polling.providerStatus}</span> : null}
                   {job.polling.lastAttemptedAt ? <span>Last poll: {formatTimestamp(job.polling.lastAttemptedAt)}</span> : null}
                   {job.polling.nextSuggestedPollAt ? <span>Next poll: {formatTimestamp(job.polling.nextSuggestedPollAt)}</span> : null}
                 </div>
