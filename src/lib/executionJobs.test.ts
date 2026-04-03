@@ -15,12 +15,12 @@ import type { ResolvedProviderAuth } from "./providerAuth";
 const resolveProviderAuth = (targetId: BackendTargetId): ResolvedProviderAuth =>
   targetId === "dense-cpu"
     ? { provider: "local", mode: "not-required" }
-    : { provider: "ionq", mode: "browser-session", apiKey: "test-ionq-key" };
+    : { provider: "ionq", mode: "server-managed" };
 
 describe("executionJobs", () => {
-  it("completes local dense-cpu sampling jobs immediately", () => {
+  it("completes local dense-cpu sampling jobs immediately", async () => {
     const circuit = buildQaoaExecutionCircuit(2, [[0, 1]], [], []);
-    const job = submitSamplingExecutionJob(
+    const job = await submitSamplingExecutionJob(
       {
         targetId: "dense-cpu",
         circuit,
@@ -40,9 +40,9 @@ describe("executionJobs", () => {
     expect(job.statusDetail).toMatch(/completed immediately/i);
   });
 
-  it("queues remote provider jobs instead of pretending to execute them locally", () => {
+  it("queues remote provider jobs instead of pretending to execute them locally", async () => {
     const circuit = buildVqeExecutionCircuit([]);
-    const job = submitSamplingExecutionJob(
+    const job = await submitSamplingExecutionJob(
       {
         targetId: "ionq-simulator",
         circuit,
@@ -128,12 +128,13 @@ describe("executionJobs", () => {
       resumable: true,
       nextSuggestedPollAt: "2026-04-02T00:15:00.000Z",
       providerStatus: undefined,
+      providerChildJobIds: undefined,
     });
   });
 
-  it("resumes remote jobs through running, pending result retrieval, and final completion", () => {
+  it("resumes remote jobs through running, pending result retrieval, and final completion", async () => {
     const circuit = buildVqeExecutionCircuit([]);
-    const queuedJob = submitSamplingExecutionJob(
+    const queuedJob = await submitSamplingExecutionJob(
       {
         targetId: "ionq-qpu",
         circuit,
@@ -145,10 +146,10 @@ describe("executionJobs", () => {
       resolveProviderAuth("ionq-qpu"),
     );
 
-    const [readyJob] = pollExecutionJobs([queuedJob], resolveProviderAuth, "2026-04-02T12:00:00.000Z");
-    const [runningJob] = pollExecutionJobs([readyJob!], resolveProviderAuth, "2026-04-02T13:00:00.000Z");
-    const [retrievalPendingJob] = pollExecutionJobs([runningJob!], resolveProviderAuth, "2026-04-02T14:00:00.000Z");
-    const [completedJob] = pollExecutionJobs([retrievalPendingJob!], resolveProviderAuth, "2026-04-02T15:00:00.000Z");
+    const [readyJob] = await pollExecutionJobs([queuedJob], resolveProviderAuth, "2026-04-02T12:00:00.000Z");
+    const [runningJob] = await pollExecutionJobs([readyJob!], resolveProviderAuth, "2026-04-02T13:00:00.000Z");
+    const [retrievalPendingJob] = await pollExecutionJobs([runningJob!], resolveProviderAuth, "2026-04-02T14:00:00.000Z");
+    const [completedJob] = await pollExecutionJobs([retrievalPendingJob!], resolveProviderAuth, "2026-04-02T15:00:00.000Z");
 
     expect(readyJob?.status).toBe("queued");
     expect(readyJob?.polling.providerStatus).toBe("ready");
@@ -156,7 +157,7 @@ describe("executionJobs", () => {
     expect(runningJob?.polling.attemptCount).toBe(2);
     expect(runningJob?.polling.lastAttemptedAt).toBe("2026-04-02T13:00:00.000Z");
     expect(runningJob?.polling.externalJobId).toMatch(/^ionq_/);
-    expect(runningJob?.polling.providerStatus).toBe("started");
+    expect(runningJob?.polling.providerStatus).toBe("running");
     expect(retrievalPendingJob?.status).toBe("running");
     expect(retrievalPendingJob?.polling.providerStatus).toBe("completed");
     expect(retrievalPendingJob?.polling.resultRetrievalState).toBe("pending");
@@ -165,9 +166,9 @@ describe("executionJobs", () => {
     expect(completedJob?.result?.bitstrings.length).toBeGreaterThan(0);
   });
 
-  it("can retry failed jobs without overwriting the prior failed attempt", () => {
+  it("can retry failed jobs without overwriting the prior failed attempt", async () => {
     const circuit = buildVqeExecutionCircuit([]);
-    const queuedJob = submitSamplingExecutionJob(
+    const queuedJob = await submitSamplingExecutionJob(
       {
         targetId: "ionq-simulator",
         circuit,
@@ -179,10 +180,10 @@ describe("executionJobs", () => {
       resolveProviderAuth("ionq-simulator"),
     );
 
-    const [runningJob] = pollExecutionJobs([queuedJob], resolveProviderAuth, "2026-04-02T12:00:00.000Z");
+    const [runningJob] = await pollExecutionJobs([queuedJob], resolveProviderAuth, "2026-04-02T12:00:00.000Z");
     const failedJob = markExecutionJobFailed(runningJob!, "Provider timeout", "2026-04-02T13:00:00.000Z");
-    const { archivedJob, retriedJob } = retryExecutionJob(failedJob, resolveProviderAuth, "2026-04-02T14:00:00.000Z");
-    const history = retryExecutionJobInHistory([failedJob], failedJob.id, resolveProviderAuth, "2026-04-02T14:00:00.000Z");
+    const { archivedJob, retriedJob } = await retryExecutionJob(failedJob, resolveProviderAuth, "2026-04-02T14:00:00.000Z");
+    const history = await retryExecutionJobInHistory([failedJob], failedJob.id, resolveProviderAuth, "2026-04-02T14:00:00.000Z");
 
     expect(failedJob.status).toBe("failed");
     expect(failedJob.errorMessage).toBe("Provider timeout");
@@ -197,9 +198,9 @@ describe("executionJobs", () => {
     expect(history[1]?.supersededByJobId).toBe(history[0]?.id);
   });
 
-  it("fails remote polling cleanly when the auth required for that provider is missing", () => {
+  it("fails remote polling cleanly when the auth required for that provider is missing", async () => {
     const circuit = buildVqeExecutionCircuit([]);
-    const queuedJob = submitSamplingExecutionJob(
+    const queuedJob = await submitSamplingExecutionJob(
       {
         targetId: "ionq-simulator",
         circuit,
@@ -211,7 +212,7 @@ describe("executionJobs", () => {
       resolveProviderAuth("ionq-simulator"),
     );
 
-    const [failedJob] = pollExecutionJobs(
+    const [failedJob] = await pollExecutionJobs(
       [queuedJob],
       () => ({ provider: "ionq", mode: "browser-session", apiKey: "" }),
       "2026-04-02T12:00:00.000Z",

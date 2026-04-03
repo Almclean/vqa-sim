@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { startTransition, useEffect, useMemo, useRef, useState } from "react";
 import { ExecutionBackendPanel } from "./components/ExecutionBackendPanel";
 import { ExecutionJobsPanel } from "./components/ExecutionJobsPanel";
 import { HeaderBar } from "./components/HeaderBar";
@@ -160,6 +160,9 @@ export default function App(): JSX.Element {
   const [sampledMetric, setSampledMetric] = useState<SampledMetricSummary | null>(null);
   const [samplingError, setSamplingError] = useState<string | null>(null);
   const [samplingNotice, setSamplingNotice] = useState<string | null>(null);
+  const [samplingJobPending, setSamplingJobPending] = useState<boolean>(false);
+  const [jobsBusy, setJobsBusy] = useState<boolean>(false);
+  const [retryingJobId, setRetryingJobId] = useState<string | null>(null);
   const vqeStallRef = useRef<number>(0);
   const effectiveEdges = useMemo(() => filterEdgesForNodeCount(edges, nodeCount), [edges, nodeCount]);
   const selectedExecutionTargetDescriptor = useMemo(
@@ -190,6 +193,19 @@ export default function App(): JSX.Element {
       : null;
   const resolveExecutionAuth = (targetId: typeof backendPreferences.executionTarget) =>
     resolveProviderAuthForTarget(targetId, backendPreferences, providerSessionCredentials);
+
+  const applySamplingJobResult = (job: ExecutionJobRecord): void => {
+    const result = job.result;
+    if (!result) return;
+
+    startTransition(() => {
+      setSampledBitstrings(result.bitstrings);
+      setSampledMetric({
+        estimate: result.estimate,
+        totalShotsUsed: result.totalShotsUsed,
+      });
+    });
+  };
 
   useEffect(() => {
     setRunning(false);
@@ -421,48 +437,101 @@ export default function App(): JSX.Element {
     setIteration(0);
   };
 
-  const handleSampleBitstrings = () => {
-    if (running) return;
+  const handleSampleBitstrings = async () => {
+    if (running || samplingJobPending) return;
 
+    setSamplingJobPending(true);
     try {
-      const job =
+      const request =
         algorithm === "qaoa"
-          ? submitSamplingExecutionJob({
+          ? {
               targetId: backendPreferences.executionTarget,
               circuit: currentExecutableCircuit,
-              algorithm: "qaoa",
+              algorithm: "qaoa" as const,
               shots: measurementShots,
               nodeCount,
               edges: effectiveEdges,
               gammas,
               betas,
-            }, selectedExecutionTargetAuth)
-          : submitSamplingExecutionJob({
+            }
+          : {
               targetId: backendPreferences.executionTarget,
               circuit: currentExecutableCircuit,
-              algorithm: "vqe",
+              algorithm: "vqe" as const,
               shots: measurementShots,
               thetas,
               molecule,
-            }, selectedExecutionTargetAuth);
+            };
+      const job = await submitSamplingExecutionJob(request, selectedExecutionTargetAuth);
 
-      setExecutionJobs((prev) => [job, ...prev].slice(0, 24));
+      startTransition(() => {
+        setExecutionJobs((prev) => [job, ...prev].slice(0, 24));
+        setSamplingError(null);
+        setSamplingNotice(job.statusDetail);
+      });
 
-      if (job.result) {
-        setSampledBitstrings(job.result.bitstrings);
-        setSampledMetric({
-          estimate: job.result.estimate,
-          totalShotsUsed: job.result.totalShotsUsed,
-        });
-      }
-
-      setSamplingError(null);
-      setSamplingNotice(job.statusDetail);
+      applySamplingJobResult(job);
     } catch (error) {
-      setSampledBitstrings([]);
-      setSampledMetric(null);
-      setSamplingNotice(null);
-      setSamplingError(error instanceof Error ? error.message : "Unable to sample bitstrings.");
+      startTransition(() => {
+        setSampledBitstrings([]);
+        setSampledMetric(null);
+        setSamplingNotice(null);
+        setSamplingError(error instanceof Error ? error.message : "Unable to sample bitstrings.");
+      });
+    } finally {
+      setSamplingJobPending(false);
+    }
+  };
+
+  const handlePollJobs = async () => {
+    if (jobsBusy) return;
+
+    setJobsBusy(true);
+    try {
+      const pollTimestamp = new Date().toISOString();
+      const nextJobs = await pollExecutionJobs(executionJobs, resolveExecutionAuth, pollTimestamp);
+      const completedJob = nextJobs.find((job) => job.result && job.updatedAt === pollTimestamp);
+
+      startTransition(() => {
+        setExecutionJobs(nextJobs);
+        if (completedJob) {
+          setSamplingError(null);
+          setSamplingNotice(completedJob.statusDetail);
+        }
+      });
+
+      if (completedJob) {
+        applySamplingJobResult(completedJob);
+      }
+    } finally {
+      setJobsBusy(false);
+    }
+  };
+
+  const handleRetryJob = async (jobId: string) => {
+    if (jobsBusy) return;
+
+    setJobsBusy(true);
+    setRetryingJobId(jobId);
+    try {
+      const retriedAt = new Date().toISOString();
+      const nextJobs = await retryExecutionJobInHistory(executionJobs, jobId, resolveExecutionAuth, retriedAt);
+      const retriedJob = nextJobs[0];
+
+      startTransition(() => {
+        setExecutionJobs(nextJobs);
+        if (retriedJob && retriedJob.sourceJobId === jobId) {
+          setSamplingError(null);
+          setSamplingNotice(retriedJob.statusDetail);
+        }
+      });
+
+      if (retriedJob && retriedJob.sourceJobId === jobId) {
+        applySamplingJobResult(retriedJob);
+      }
+    } finally {
+      setRetryingJobId(null);
+      setJobsBusy(false);
     }
   };
 
@@ -511,13 +580,11 @@ export default function App(): JSX.Element {
             />
             <ExecutionJobsPanel
               jobs={executionJobs}
+              busy={jobsBusy}
+              retryingJobId={retryingJobId}
               onClearHistory={() => setExecutionJobs([])}
-              onPollJobs={() =>
-                setExecutionJobs((prev) =>
-                  pollExecutionJobs(prev, resolveExecutionAuth),
-                )
-              }
-              onRetryJob={(jobId) => setExecutionJobs((prev) => retryExecutionJobInHistory(prev, jobId, resolveExecutionAuth))}
+              onPollJobs={handlePollJobs}
+              onRetryJob={handleRetryJob}
             />
 
             <TargetDomainWidget
@@ -718,10 +785,10 @@ export default function App(): JSX.Element {
                     <button
                       type="button"
                       onClick={handleSampleBitstrings}
-                      disabled={running}
+                      disabled={running || samplingJobPending}
                       className="rounded-md border border-cyan-700 bg-cyan-900/40 px-3 py-2 text-sm font-medium text-cyan-200 transition hover:bg-cyan-900/60 disabled:cursor-not-allowed disabled:border-neutral-700 disabled:bg-neutral-800 disabled:text-neutral-500"
                     >
-                      Refresh sampled estimate
+                      {samplingJobPending ? "Submitting..." : "Refresh sampled estimate"}
                     </button>
                   </div>
 

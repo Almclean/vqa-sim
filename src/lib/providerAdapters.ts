@@ -14,6 +14,14 @@ import type {
   SamplingExecutionJobRequest,
   SamplingExecutionJobResult,
 } from "./executionJobs";
+import {
+  IonQApiError,
+  createIonQJob,
+  decodeIonQResultsToSamplingResult,
+  getIonQJobDetails,
+  getIonQJobResults,
+  type IonQJobStatus,
+} from "./ionqApi";
 import type { ResolvedProviderAuth } from "./providerAuth";
 
 export interface ExecutionProviderAdapter {
@@ -22,16 +30,16 @@ export interface ExecutionProviderAdapter {
     request: SamplingExecutionJobRequest,
     submittedAt: string,
     providerAuth: ResolvedProviderAuth,
-  ): ExecutionJobRecord;
-  pollJob(job: ExecutionJobRecord, nowIso: string, providerAuth: ResolvedProviderAuth): ExecutionJobRecord;
+  ): Promise<ExecutionJobRecord>;
+  pollJob(job: ExecutionJobRecord, nowIso: string, providerAuth: ResolvedProviderAuth): Promise<ExecutionJobRecord>;
 }
 
-export type IonQProviderJobStatus = "submitted" | "ready" | "started" | "completed" | "failed" | "canceled";
+export type IonQProviderJobStatus = IonQJobStatus;
 
 export type IonQSubmissionResponse = {
   provider: "ionq";
   jobId: string;
-  status: Exclude<IonQProviderJobStatus, "completed" | "failed" | "canceled">;
+  status: "submitted" | "ready" | "running";
   statusDetail?: string;
 };
 
@@ -42,6 +50,7 @@ export type IonQJobStatusResponse = {
   statusDetail?: string;
   result?: SamplingExecutionJobResult;
   errorMessage?: string;
+  childJobIds?: string[];
 };
 
 export type IonQJobResultResponse = {
@@ -55,9 +64,21 @@ export type IonQJobResultResponse = {
 
 export interface IonQProviderTransport {
   readonly provider: "ionq";
-  submitSamplingJob(request: SamplingExecutionJobRequest, submittedAt: string): IonQSubmissionResponse;
-  getJobStatus(job: ExecutionJobRecord, polledAt: string): IonQJobStatusResponse;
-  getJobResult(job: ExecutionJobRecord, retrievedAt: string): IonQJobResultResponse;
+  submitSamplingJob(
+    request: SamplingExecutionJobRequest,
+    submittedAt: string,
+    providerAuth: Extract<ResolvedProviderAuth, { provider: "ionq" }>,
+  ): Promise<IonQSubmissionResponse>;
+  getJobStatus(
+    job: ExecutionJobRecord,
+    polledAt: string,
+    providerAuth: Extract<ResolvedProviderAuth, { provider: "ionq" }>,
+  ): Promise<IonQJobStatusResponse>;
+  getJobResult(
+    job: ExecutionJobRecord,
+    retrievedAt: string,
+    providerAuth: Extract<ResolvedProviderAuth, { provider: "ionq" }>,
+  ): Promise<IonQJobResultResponse>;
 }
 
 const addMinutesToIsoTimestamp = (timestamp: string, minutes: number): string => {
@@ -89,13 +110,17 @@ const runLocalSamplingJob = (request: SamplingExecutionJobRequest): SamplingExec
   return toSamplingJobResult(sampleVqeMeasurementEstimate(request.thetas, request.molecule, request.shots, "dense-cpu"));
 };
 
-const makeQueuedPollingState = (submittedAt: string, externalJobId?: string): ExecutionPollingState => ({
+const makeQueuedPollingState = (
+  submittedAt: string,
+  externalJobId?: string,
+  providerStatus?: string,
+): ExecutionPollingState => ({
   attemptCount: 0,
   retryCount: 0,
   resumable: true,
   nextSuggestedPollAt: addMinutesToIsoTimestamp(submittedAt, 15),
   externalJobId,
-  providerStatus: "submitted",
+  providerStatus: providerStatus ?? "submitted",
 });
 
 const makeExecutionJobId = (): string =>
@@ -123,9 +148,44 @@ const assertIonQProviderAuth = (
   return ionqAuth;
 };
 
+const assertIonQBrowserSessionAuth = (
+  providerAuth: Extract<ResolvedProviderAuth, { provider: "ionq" }>,
+): Extract<ResolvedProviderAuth, { provider: "ionq"; mode: "browser-session" }> => {
+  if (providerAuth.mode !== "browser-session") {
+    throw new Error("IonQ browser transport requires browser-session credentials.");
+  }
+
+  if (!providerAuth.apiKey) {
+    throw new Error("IonQ browser-session mode requires an API key for this tab before remote execution can start.");
+  }
+
+  return providerAuth;
+};
+
+const describeIonQRemoteStatus = (status: IonQProviderJobStatus, polledAt: string): string => {
+  switch (status) {
+    case "submitted":
+      return "IonQ accepted the remote job and placed it in the provider queue.";
+    case "ready":
+      return "IonQ has acknowledged the job and it is waiting for execution.";
+    case "running":
+      return `IonQ reports the job is running as of ${new Date(polledAt).toLocaleString()}.`;
+    case "completed":
+      return "IonQ reports quantum execution is complete and final results are being prepared.";
+    case "failed":
+      return "IonQ reported that the remote execution failed.";
+    case "canceled":
+      return "IonQ reported that the remote execution was canceled.";
+    default: {
+      const exhaustiveCheck: never = status;
+      return exhaustiveCheck;
+    }
+  }
+};
+
 const localProviderAdapter: ExecutionProviderAdapter = {
   provider: "local",
-  submitSamplingJob(request, submittedAt, providerAuth) {
+  async submitSamplingJob(request, submittedAt, providerAuth) {
     assertProviderMatchesAdapter(providerAuth, "local");
     const descriptor = getBackendTargetDescriptor(request.targetId);
     const result = runLocalSamplingJob(request);
@@ -153,15 +213,15 @@ const localProviderAdapter: ExecutionProviderAdapter = {
       result,
     };
   },
-  pollJob(job, _nowIso, providerAuth) {
+  async pollJob(job, _nowIso, providerAuth) {
     assertProviderMatchesAdapter(providerAuth, "local");
     return job;
   },
 };
 
-const defaultIonQTransport: IonQProviderTransport = {
+const stubIonQTransport: IonQProviderTransport = {
   provider: "ionq",
-  submitSamplingJob(_request, submittedAt) {
+  async submitSamplingJob(_request, submittedAt) {
     return {
       provider: "ionq",
       jobId: `ionq_${submittedAt.replace(/[^0-9]/g, "").slice(-12)}`,
@@ -169,7 +229,7 @@ const defaultIonQTransport: IonQProviderTransport = {
       statusDetail: "IonQ accepted the remote job and placed it in the provider queue.",
     };
   },
-  getJobStatus(job, polledAt) {
+  async getJobStatus(job, polledAt) {
     if (job.polling.providerStatus === "completed") {
       return {
         provider: "ionq",
@@ -192,8 +252,8 @@ const defaultIonQTransport: IonQProviderTransport = {
       return {
         provider: "ionq",
         jobId: job.polling.externalJobId ?? `ionq_${job.id}`,
-        status: "started",
-        statusDetail: `IonQ reports the job started execution as of ${new Date(polledAt).toLocaleString()}.`,
+        status: "running",
+        statusDetail: `IonQ reports the job is running as of ${new Date(polledAt).toLocaleString()}.`,
       };
     }
 
@@ -204,7 +264,7 @@ const defaultIonQTransport: IonQProviderTransport = {
       statusDetail: "IonQ reports quantum execution is complete and final results are being prepared.",
     };
   },
-  getJobResult(job) {
+  async getJobResult(job) {
     if (!job.request) {
       return {
         provider: "ionq",
@@ -233,13 +293,101 @@ const defaultIonQTransport: IonQProviderTransport = {
   },
 };
 
-let ionqTransport: IonQProviderTransport = defaultIonQTransport;
+const browserSessionIonQTransport: IonQProviderTransport = {
+  provider: "ionq",
+  async submitSamplingJob(request, submittedAt, providerAuth) {
+    const ionqAuth = assertIonQBrowserSessionAuth(providerAuth);
+    const response = await createIonQJob(request, ionqAuth.apiKey);
 
-const mapIonQJobStatusToExecutionRecord = (
+    if (response.status === "completed" || response.status === "failed" || response.status === "canceled") {
+      throw new Error(`IonQ returned unexpected submission status "${response.status}".`);
+    }
+
+    return {
+      provider: "ionq",
+      jobId: response.id,
+      status: response.status,
+      statusDetail: describeIonQRemoteStatus(response.status, submittedAt),
+    };
+  },
+  async getJobStatus(job, polledAt, providerAuth) {
+    const ionqAuth = assertIonQBrowserSessionAuth(providerAuth);
+    const externalJobId = job.polling.externalJobId;
+    if (!externalJobId) {
+      throw new Error("IonQ polling requires a provider job identifier.");
+    }
+
+    const details = await getIonQJobDetails(externalJobId, ionqAuth.apiKey);
+    return {
+      provider: "ionq",
+      jobId: details.id,
+      status: details.status,
+      statusDetail: describeIonQRemoteStatus(details.status, polledAt),
+      errorMessage: details.failure?.error ?? details.failure?.code,
+      childJobIds: details.children,
+    };
+  },
+  async getJobResult(job, _retrievedAt, providerAuth) {
+    const ionqAuth = assertIonQBrowserSessionAuth(providerAuth);
+    const externalJobId = job.polling.externalJobId;
+    if (!externalJobId) {
+      throw new Error("IonQ result retrieval requires a provider job identifier.");
+    }
+    if (!job.request) {
+      return {
+        provider: "ionq",
+        jobId: externalJobId,
+        status: "failed",
+        errorMessage: "Remote result retrieval requires the original request snapshot.",
+      };
+    }
+
+    try {
+      const results = await getIonQJobResults(externalJobId, ionqAuth.apiKey);
+      return {
+        provider: "ionq",
+        jobId: externalJobId,
+        status: "ready",
+        statusDetail: "Retrieved final IonQ result payload.",
+        result: decodeIonQResultsToSamplingResult(job.request, results, job.polling.providerChildJobIds),
+      };
+    } catch (error) {
+      if (error instanceof IonQApiError && (error.status === 404 || error.status === 409)) {
+        return {
+          provider: "ionq",
+          jobId: externalJobId,
+          status: "pending",
+          statusDetail: "IonQ finished execution, but the final result payload is not ready yet.",
+        };
+      }
+
+      return {
+        provider: "ionq",
+        jobId: externalJobId,
+        status: "failed",
+        errorMessage: error instanceof Error ? error.message : "IonQ result retrieval failed.",
+      };
+    }
+  },
+};
+
+let ionqTransportOverride: IonQProviderTransport | null = null;
+
+const resolveIonQTransport = (providerAuth: Extract<ResolvedProviderAuth, { provider: "ionq" }>): IonQProviderTransport => {
+  if (ionqTransportOverride) {
+    return ionqTransportOverride;
+  }
+
+  return providerAuth.mode === "browser-session" ? browserSessionIonQTransport : stubIonQTransport;
+};
+
+const mapIonQJobStatusToExecutionRecord = async (
   job: ExecutionJobRecord,
   response: IonQJobStatusResponse,
   polledAt: string,
-): ExecutionJobRecord => {
+  providerAuth: Extract<ResolvedProviderAuth, { provider: "ionq" }>,
+  transport: IonQProviderTransport,
+): Promise<ExecutionJobRecord> => {
   const basePollingState: ExecutionPollingState = {
     ...job.polling,
     attemptCount: job.polling.attemptCount + 1,
@@ -247,6 +395,7 @@ const mapIonQJobStatusToExecutionRecord = (
     nextSuggestedPollAt: undefined,
     externalJobId: response.jobId,
     providerStatus: response.status,
+    providerChildJobIds: response.childJobIds ?? job.polling.providerChildJobIds,
     resultRetrievalState: job.polling.resultRetrievalState,
     resultRetrievalAttemptCount: job.polling.resultRetrievalAttemptCount,
     lastResultRetrievedAt: job.polling.lastResultRetrievedAt,
@@ -266,7 +415,7 @@ const mapIonQJobStatusToExecutionRecord = (
           nextSuggestedPollAt: addMinutesToIsoTimestamp(polledAt, 30),
         },
       };
-    case "started":
+    case "running":
       return {
         ...job,
         status: "running",
@@ -281,7 +430,11 @@ const mapIonQJobStatusToExecutionRecord = (
       };
     case "completed":
       if (!response.result) {
-        const retrieval = ionqTransport.getJobResult(job, polledAt);
+        const completedJob: ExecutionJobRecord = {
+          ...job,
+          polling: basePollingState,
+        };
+        const retrieval = await transport.getJobResult(completedJob, polledAt, providerAuth);
         const retrievalAttemptCount = (job.polling.resultRetrievalAttemptCount ?? 0) + 1;
 
         if (retrieval.status === "pending") {
@@ -378,10 +531,11 @@ const mapIonQJobStatusToExecutionRecord = (
 
 const ionqProviderAdapter: ExecutionProviderAdapter = {
   provider: "ionq",
-  submitSamplingJob(request, submittedAt, providerAuth) {
+  async submitSamplingJob(request, submittedAt, providerAuth) {
     const resolvedAuth = assertIonQProviderAuth(providerAuth);
     const descriptor = getBackendTargetDescriptor(request.targetId);
-    const submission = ionqTransport.submitSamplingJob(request, submittedAt);
+    const transport = resolveIonQTransport(resolvedAuth);
+    const submission = await transport.submitSamplingJob(request, submittedAt, resolvedAuth);
     const authSuffix =
       resolvedAuth.mode === "server-managed"
         ? "Provider auth will be supplied by the server-side execution layer."
@@ -396,24 +550,26 @@ const ionqProviderAdapter: ExecutionProviderAdapter = {
       targetLabel: descriptor.label,
       algorithm: request.algorithm,
       intent: "shot-sampling",
-      status: "queued",
+      status: submission.status === "running" ? "running" : "queued",
       submittedAt,
       updatedAt: submittedAt,
+      startedAt: submission.status === "running" ? submittedAt : undefined,
       shots: request.shots,
       queueBehavior: "provider-queue",
       statusDetail,
-      polling: makeQueuedPollingState(submittedAt, submission.jobId),
+      polling: makeQueuedPollingState(submittedAt, submission.jobId, submission.status),
       request,
     };
   },
-  pollJob(job, nowIso, providerAuth) {
-    assertIonQProviderAuth(providerAuth);
+  async pollJob(job, nowIso, providerAuth) {
+    const resolvedAuth = assertIonQProviderAuth(providerAuth);
     if (job.status !== "queued" && job.status !== "running") {
       return job;
     }
 
-    const response = ionqTransport.getJobStatus(job, nowIso);
-    return mapIonQJobStatusToExecutionRecord(job, response, nowIso);
+    const transport = resolveIonQTransport(resolvedAuth);
+    const response = await transport.getJobStatus(job, nowIso, resolvedAuth);
+    return mapIonQJobStatusToExecutionRecord(job, response, nowIso, resolvedAuth, transport);
   },
 };
 
@@ -429,9 +585,9 @@ export const getExecutionProviderAdapterForTarget = (targetId: BackendTargetId):
   getExecutionProviderAdapter(getBackendTargetDescriptor(targetId).provider);
 
 export const setIonQProviderTransport = (transport: IonQProviderTransport): void => {
-  ionqTransport = transport;
+  ionqTransportOverride = transport;
 };
 
 export const resetIonQProviderTransport = (): void => {
-  ionqTransport = defaultIonQTransport;
+  ionqTransportOverride = null;
 };

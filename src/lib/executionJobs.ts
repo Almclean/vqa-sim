@@ -45,6 +45,7 @@ export type ExecutionPollingState = {
   nextSuggestedPollAt?: string;
   externalJobId?: string;
   providerStatus?: string;
+  providerChildJobIds?: string[];
   resultRetrievalState?: ExecutionResultRetrievalState;
   resultRetrievalAttemptCount?: number;
   lastResultRetrievedAt?: string;
@@ -126,6 +127,7 @@ const normalizeExecutionJobRecord = (job: Partial<ExecutionJobRecord>): Executio
       nextSuggestedPollAt: polling.nextSuggestedPollAt,
       externalJobId: polling.externalJobId,
       providerStatus: typeof polling.providerStatus === "string" ? polling.providerStatus : undefined,
+      providerChildJobIds: Array.isArray(polling.providerChildJobIds) ? polling.providerChildJobIds : undefined,
       resultRetrievalState:
         polling.resultRetrievalState === "pending" || polling.resultRetrievalState === "retrieved"
           ? polling.resultRetrievalState
@@ -164,10 +166,10 @@ export const saveExecutionJobs = (jobs: ExecutionJobRecord[]): void => {
   window.localStorage.setItem(EXECUTION_JOBS_STORAGE_KEY, JSON.stringify(jobs.slice(0, MAX_PERSISTED_EXECUTION_JOBS)));
 };
 
-export const submitSamplingExecutionJob = (
+export const submitSamplingExecutionJob = async (
   request: SamplingExecutionJobRequest,
   providerAuth: ResolvedProviderAuth,
-): ExecutionJobRecord => {
+): Promise<ExecutionJobRecord> => {
   const acceptance = canBackendTargetAcceptCircuit(request.targetId, request.circuit);
   if (!acceptance.supported) {
     throw new Error(acceptance.reason ?? `Execution target "${request.targetId}" cannot accept the current circuit.`);
@@ -177,25 +179,31 @@ export const submitSamplingExecutionJob = (
   return getExecutionProviderAdapterForTarget(request.targetId).submitSamplingJob(request, timestamp, providerAuth);
 };
 
-export const pollExecutionJobs = (
+export const pollExecutionJobs = async (
   jobs: ExecutionJobRecord[],
   resolveProviderAuth: (targetId: BackendTargetId) => ResolvedProviderAuth,
   nowIso: string = new Date().toISOString(),
-): ExecutionJobRecord[] =>
-  jobs.map((job) => {
-    if (job.queueBehavior !== "provider-queue") return job;
-    if (job.status !== "queued" && job.status !== "running") return job;
+): Promise<ExecutionJobRecord[]> =>
+  Promise.all(
+    jobs.map(async (job) => {
+      if (job.queueBehavior !== "provider-queue") return job;
+      if (job.status !== "queued" && job.status !== "running") return job;
 
-    try {
-      return getExecutionProviderAdapterForTarget(job.targetId).pollJob(job, nowIso, resolveProviderAuth(job.targetId));
-    } catch (error) {
-      return markExecutionJobFailed(
-        job,
-        error instanceof Error ? error.message : `Unable to poll ${job.targetLabel}.`,
-        nowIso,
-      );
-    }
-  });
+      try {
+        return await getExecutionProviderAdapterForTarget(job.targetId).pollJob(
+          job,
+          nowIso,
+          resolveProviderAuth(job.targetId),
+        );
+      } catch (error) {
+        return markExecutionJobFailed(
+          job,
+          error instanceof Error ? error.message : `Unable to poll ${job.targetLabel}.`,
+          nowIso,
+        );
+      }
+    }),
+  );
 
 export const markExecutionJobFailed = (
   job: ExecutionJobRecord,
@@ -214,11 +222,11 @@ export const markExecutionJobFailed = (
   },
 });
 
-export const retryExecutionJob = (
+export const retryExecutionJob = async (
   job: ExecutionJobRecord,
   resolveProviderAuth: (targetId: BackendTargetId) => ResolvedProviderAuth,
   retriedAt: string = new Date().toISOString(),
-): { archivedJob: ExecutionJobRecord; retriedJob: ExecutionJobRecord } => {
+): Promise<{ archivedJob: ExecutionJobRecord; retriedJob: ExecutionJobRecord }> => {
   if (!job.request) {
     throw new Error(`Execution job "${job.id}" cannot be retried because its original request snapshot is unavailable.`);
   }
@@ -227,7 +235,7 @@ export const retryExecutionJob = (
     throw new Error(`Execution job "${job.id}" has already been retried as "${job.supersededByJobId}".`);
   }
 
-  const retriedJob = getExecutionProviderAdapterForTarget(job.targetId).submitSamplingJob(
+  const retriedJob = await getExecutionProviderAdapterForTarget(job.targetId).submitSamplingJob(
     job.request,
     retriedAt,
     resolveProviderAuth(job.targetId),
@@ -256,16 +264,16 @@ export const retryExecutionJob = (
   };
 };
 
-export const retryExecutionJobInHistory = (
+export const retryExecutionJobInHistory = async (
   jobs: ExecutionJobRecord[],
   jobId: string,
   resolveProviderAuth: (targetId: BackendTargetId) => ResolvedProviderAuth,
   retriedAt: string = new Date().toISOString(),
-): ExecutionJobRecord[] => {
+): Promise<ExecutionJobRecord[]> => {
   const job = jobs.find((candidate) => candidate.id === jobId);
   if (!job || job.status !== "failed") return jobs;
   try {
-    const { archivedJob, retriedJob } = retryExecutionJob(job, resolveProviderAuth, retriedAt);
+    const { archivedJob, retriedJob } = await retryExecutionJob(job, resolveProviderAuth, retriedAt);
     return [retriedJob, ...jobs.map((candidate) => (candidate.id === jobId ? archivedJob : candidate))].slice(
       0,
       MAX_PERSISTED_EXECUTION_JOBS,

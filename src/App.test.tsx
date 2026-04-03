@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -98,6 +98,7 @@ describe("App", () => {
 
     fireEvent.change(screen.getByLabelText(/measurement shots per batch/i), { target: { value: "4" } });
     await user.click(screen.getByRole("button", { name: /refresh sampled estimate/i }));
+    await waitFor(() => expect(sampleQaoaMeasurementEstimate).toHaveBeenCalled());
 
     expect(sampleQaoaMeasurementEstimate).toHaveBeenCalledWith(
       4,
@@ -128,6 +129,7 @@ describe("App", () => {
     await user.selectOptions(screen.getAllByRole("combobox")[0], "vqe");
     fireEvent.change(screen.getByLabelText(/measurement shots per batch/i), { target: { value: "3" } });
     await user.click(screen.getByRole("button", { name: /refresh sampled estimate/i }));
+    await waitFor(() => expect(sampleVqeMeasurementEstimate).toHaveBeenCalled());
 
     expect(sampleVqeMeasurementEstimate).toHaveBeenCalledWith(
       [0.25, 0.125, 0.08333333333333333, 0.0625],
@@ -150,6 +152,7 @@ describe("App", () => {
     await user.selectOptions(screen.getByLabelText(/execution target/i), "ionq-simulator");
     await user.selectOptions(screen.getByLabelText(/ionq auth mode/i), "server-managed");
     await user.click(screen.getByRole("button", { name: /refresh sampled estimate/i }));
+    await screen.findByText(/ionq simulator · shot-sampling/i);
 
     expect(sampleQaoaMeasurementEstimate).not.toHaveBeenCalled();
     expect(screen.getAllByText(/server-side execution layer/i)).toHaveLength(2);
@@ -166,6 +169,7 @@ describe("App", () => {
     await user.selectOptions(screen.getByLabelText(/execution target/i), "ionq-qpu");
     await user.selectOptions(screen.getByLabelText(/ionq auth mode/i), "server-managed");
     await user.click(screen.getByRole("button", { name: /refresh sampled estimate/i }));
+    await screen.findByText(/ionq qpu · shot-sampling/i);
 
     expect(screen.getByText(/^queued$/i)).toBeInTheDocument();
 
@@ -176,19 +180,22 @@ describe("App", () => {
     expect(screen.getByText(/^queued$/i)).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /poll jobs/i }));
+    await screen.findByText(/provider status: ready/i);
 
     expect(screen.getByText(/^queued$/i)).toBeInTheDocument();
     expect(screen.getByText(/provider status: ready/i)).toBeInTheDocument();
     expect(screen.getByText(/waiting for execution/i)).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /poll jobs/i }));
+    await screen.findByText(/provider status: running/i);
 
     expect(screen.getByText(/^running$/i)).toBeInTheDocument();
-    expect(screen.getByText(/provider status: started/i)).toBeInTheDocument();
-    expect(screen.getByText(/started execution/i)).toBeInTheDocument();
+    expect(screen.getByText(/provider status: running/i)).toBeInTheDocument();
+    expect(screen.getByText(/is running/i)).toBeInTheDocument();
     expect(screen.getByText(/attempts: 2/i)).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /poll jobs/i }));
+    await screen.findByText(/result retrieval: pending/i);
 
     expect(screen.getByText(/^running$/i)).toBeInTheDocument();
     expect(screen.getByText(/provider status: completed/i)).toBeInTheDocument();
@@ -196,10 +203,11 @@ describe("App", () => {
     expect(screen.getByText(/final result payload is not ready yet/i)).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /poll jobs/i }));
+    await screen.findByText(/result retrieval: retrieved/i);
 
     expect(screen.getByText(/^completed$/i)).toBeInTheDocument();
     expect(screen.getByText(/result retrieval: retrieved/i)).toBeInTheDocument();
-    expect(screen.getByText(/retrieved final ionq result payload/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/retrieved final ionq result payload/i)).toHaveLength(2);
     expect(screen.getByText(/total shots used/i)).toBeInTheDocument();
   });
 
