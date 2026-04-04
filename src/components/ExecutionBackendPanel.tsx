@@ -2,7 +2,6 @@ import {
   getBackendTargetDescriptor,
   listBackendTargets,
   type BackendTargetId,
-  type BackendTargetDescriptor,
 } from "../lib/backendTargets";
 import type { IonQCredentialMode } from "../lib/backendPreferences";
 
@@ -11,24 +10,10 @@ type ExecutionBackendPanelProps = {
   ionqCredentialMode: IonQCredentialMode;
   ionqApiKey: string;
   ionqAuthConfigured: boolean;
-  ionqAuthDetail: string;
   onExecutionTargetChange: (target: BackendTargetId) => void;
   onIonqCredentialModeChange: (mode: IonQCredentialMode) => void;
   onIonqApiKeyChange: (apiKey: string) => void;
   onClearIonqApiKey: () => void;
-};
-
-const formatIntentLabel = (intent: BackendTargetDescriptor["supportedIntents"][number]): string => {
-  switch (intent) {
-    case "expectation-values":
-      return "Expectation values";
-    case "shot-sampling":
-      return "Shot sampling";
-    case "state-vector":
-      return "State vector";
-    default:
-      return intent;
-  }
 };
 
 export function ExecutionBackendPanel({
@@ -36,7 +21,6 @@ export function ExecutionBackendPanel({
   ionqCredentialMode,
   ionqApiKey,
   ionqAuthConfigured,
-  ionqAuthDetail,
   onExecutionTargetChange,
   onIonqCredentialModeChange,
   onIonqApiKeyChange,
@@ -45,6 +29,12 @@ export function ExecutionBackendPanel({
   const descriptor = getBackendTargetDescriptor(executionTarget);
   const isRemoteTarget = descriptor.executionMode === "remote-job";
   const targetOptions = listBackendTargets();
+  const ionqStatusCopy =
+    ionqCredentialMode === "browser-session"
+      ? ionqAuthConfigured
+        ? "API key added for this tab."
+        : "Add an API key to run IonQ jobs."
+      : "Provider auth is handled outside the browser.";
 
   return (
     <section className="space-y-3">
@@ -64,35 +54,9 @@ export function ExecutionBackendPanel({
             {targetOptions.map((target) => (
               <option key={target.id} value={target.id}>
                 {target.label}
-                {target.implementationStatus === "planned" ? " (planned)" : ""}
               </option>
             ))}
           </select>
-        </div>
-
-        <div className="flex flex-wrap gap-2 text-[11px] uppercase tracking-[0.18em] text-neutral-400">
-          <span className="rounded-full border border-neutral-700 px-2 py-1">{descriptor.provider}</span>
-          <span className="rounded-full border border-neutral-700 px-2 py-1">
-            {descriptor.executionMode === "local-sync" ? "Local sync" : "Remote job"}
-          </span>
-          <span
-            className={`rounded-full border px-2 py-1 ${
-              descriptor.implementationStatus === "implemented"
-                ? "border-emerald-700 text-emerald-300"
-                : "border-amber-700 text-amber-300"
-            }`}
-          >
-            {descriptor.implementationStatus}
-          </span>
-        </div>
-
-        <p className="text-xs text-neutral-400">{descriptor.notes}</p>
-
-        <div className="rounded-md border border-neutral-800 bg-neutral-900 p-3">
-          <p className="text-[11px] uppercase tracking-[0.18em] text-neutral-500">Supported intents</p>
-          <p className="mt-2 text-sm text-neutral-200">
-            {descriptor.supportedIntents.map((intent) => formatIntentLabel(intent)).join(", ")}
-          </p>
         </div>
 
         {descriptor.provider === "ionq" ? (
@@ -126,7 +90,7 @@ export function ExecutionBackendPanel({
                   className="w-full rounded-md border border-neutral-700 bg-neutral-800 px-3 py-2 text-sm text-neutral-100 outline-none transition focus:border-cyan-500"
                 />
                 <div className="flex items-center justify-between gap-3 text-xs text-neutral-500">
-                  <span>Stored in session storage for this tab only. It is not written to local storage.</span>
+                  <span>Saved in this tab only.</span>
                   <button
                     type="button"
                     onClick={onClearIonqApiKey}
@@ -138,14 +102,12 @@ export function ExecutionBackendPanel({
               </>
             ) : (
               <div className="rounded-md border border-neutral-800 bg-neutral-950/70 p-3 text-xs text-neutral-400">
-                Prefer this mode for deployed environments. The browser will not keep a provider secret, and remote execution
-                should flow through a server-side proxy or API route.
+                Use your app or server to supply the IonQ key.
               </div>
             )}
 
-            <p className="text-xs font-medium text-neutral-300">Provider auth status</p>
             <div className="flex items-center justify-between gap-3 text-xs text-neutral-500">
-              <span>{ionqAuthDetail}</span>
+              <span>{ionqStatusCopy}</span>
               <span className={ionqAuthConfigured ? "text-emerald-300" : "text-amber-300"}>
                 {ionqAuthConfigured ? "Configured" : "Missing"}
               </span>
@@ -153,16 +115,9 @@ export function ExecutionBackendPanel({
           </div>
         ) : null}
 
-        <div className="rounded-md border border-cyan-900/60 bg-cyan-950/20 p-3 text-xs text-cyan-100">
-          <p>Local dense CPU execution completes immediately, while remote targets submit provider-backed jobs into the shared queue.</p>
-          {isRemoteTarget ? (
-            <p className="mt-2 text-cyan-200/90">
-              Local development can use a tab-scoped browser session key. Deployed environments should prefer server-managed
-              provider auth so the browser never needs a long-lived secret. Treat remote execution as poll, resume, and revisit
-              rather than a live blocking session.
-            </p>
-          ) : null}
-        </div>
+        {isRemoteTarget ? (
+          <p className="text-xs text-cyan-200">Remote runs show up in Execution Jobs and may finish later.</p>
+        ) : null}
       </div>
     </section>
   );

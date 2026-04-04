@@ -155,7 +155,8 @@ describe("App", () => {
     await screen.findByText(/ionq simulator · shot-sampling/i);
 
     expect(sampleQaoaMeasurementEstimate).not.toHaveBeenCalled();
-    expect(screen.getAllByText(/server-side execution layer/i)).toHaveLength(2);
+    expect(screen.getByText(/use your app or server to supply the ionq key/i)).toBeInTheDocument();
+    expect(screen.getByText(/provider auth is handled outside the browser/i)).toBeInTheDocument();
     expect(screen.getByText(/ionq simulator · shot-sampling/i)).toBeInTheDocument();
     expect(screen.getByText(/^queued$/i)).toBeInTheDocument();
     expect(screen.getByText(/provider status: submitted/i)).toBeInTheDocument();
@@ -222,7 +223,7 @@ describe("App", () => {
 
     expect(screen.getByLabelText(/execution target/i)).toHaveValue("ionq-simulator");
     expect(screen.getByLabelText(/ionq api key/i)).toBeInTheDocument();
-    expect(screen.getByText(/tab-scoped browser session key/i)).toBeInTheDocument();
+    expect(screen.getByText(/saved in this tab only/i)).toBeInTheDocument();
 
     await user.type(screen.getByLabelText(/ionq api key/i), "test-ionq-key");
 

@@ -552,7 +552,6 @@ export default function App(): JSX.Element {
               ionqCredentialMode={backendPreferences.ionqCredentialMode}
               ionqApiKey={providerSessionCredentials.ionqApiKey}
               ionqAuthConfigured={selectedExecutionTargetAuthStatus.configured}
-              ionqAuthDetail={selectedExecutionTargetAuthStatus.detail}
               onExecutionTargetChange={(executionTarget) =>
                 setBackendPreferences((prev) => ({
                   ...prev,
