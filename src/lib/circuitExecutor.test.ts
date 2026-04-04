@@ -16,12 +16,58 @@ import {
   getCircuitExecutor,
   sampleCircuitBitstrings,
   supportsCapability,
+  type CircuitOperation,
   type ExecutableCircuit,
+  type Observable,
 } from "./circuitExecutor";
 
 afterEach(() => {
   vi.restoreAllMocks();
 });
+
+const createSeededRandom = (seed: number): (() => number) => {
+  let state = seed >>> 0;
+  return () => {
+    state = (state * 1664525 + 1013904223) >>> 0;
+    return state / 0x1_0000_0000;
+  };
+};
+
+const buildRandomCircuit = (seed: number, qubitCount: 1 | 2, operationCount: number): ExecutableCircuit => {
+  const random = createSeededRandom(seed);
+  const operations: CircuitOperation[] = [];
+
+  for (let index = 0; index < operationCount; index += 1) {
+    const theta = (random() * 2 - 1) * Math.PI;
+
+    if (qubitCount === 1) {
+      operations.push(random() < 0.5 ? { kind: "rx", qubit: 0, theta } : { kind: "ry", qubit: 0, theta });
+      continue;
+    }
+
+    const gateSelector = random();
+    if (gateSelector < 0.4) {
+      operations.push({ kind: "rx", qubit: random() < 0.5 ? 0 : 1, theta });
+    } else if (gateSelector < 0.8) {
+      operations.push({ kind: "ry", qubit: random() < 0.5 ? 0 : 1, theta });
+    } else {
+      operations.push(random() < 0.5 ? { kind: "xx", q1: 0, q2: 1, theta } : { kind: "xx", q1: 1, q2: 0, theta });
+    }
+  }
+
+  return {
+    qubitCount,
+    operations,
+  };
+};
+
+const buildDefaultObservables = (qubitCount: number): Observable[] => {
+  const observables: Observable[] = Array.from({ length: qubitCount }, (_, qubit) => ({ kind: "z", qubit }));
+  if (qubitCount >= 2) {
+    observables.push({ kind: "zz", q1: 0, q2: 1 }, { kind: "xx", q1: 0, q2: 1 });
+  }
+  return observables;
+};
 
 describe("DenseCpuCircuitExecutor", () => {
   it("exposes backend metadata and capabilities", () => {
@@ -235,6 +281,34 @@ describe("DensityCpuCircuitExecutor", () => {
     });
   });
 
+  it("matches dense-cpu observables across deterministic randomized ideal circuits", () => {
+    const cases = [
+      { seed: 11, qubitCount: 1 as const, operationCount: 5 },
+      { seed: 19, qubitCount: 1 as const, operationCount: 7 },
+      { seed: 23, qubitCount: 2 as const, operationCount: 4 },
+      { seed: 29, qubitCount: 2 as const, operationCount: 6 },
+      { seed: 31, qubitCount: 2 as const, operationCount: 8 },
+      { seed: 37, qubitCount: 2 as const, operationCount: 9 },
+      { seed: 41, qubitCount: 2 as const, operationCount: 10 },
+      { seed: 43, qubitCount: 2 as const, operationCount: 12 },
+    ];
+
+    for (const testCase of cases) {
+      const circuit = buildRandomCircuit(testCase.seed, testCase.qubitCount, testCase.operationCount);
+      const observables = buildDefaultObservables(testCase.qubitCount);
+      const denseValues = evaluateCircuitObservables(circuit, observables, "dense-cpu");
+      const densityValues = evaluateCircuitObservables(circuit, observables, "density-cpu");
+
+      expect(densityValues.length).toBe(denseValues.length);
+      densityValues.forEach((value, index) => {
+        expect(
+          value,
+          `seed=${testCase.seed} qubits=${testCase.qubitCount} ops=${testCase.operationCount} observable=${index}`,
+        ).toBeCloseTo(denseValues[index]!, 9);
+      });
+    }
+  });
+
   it("executes a real depolarizing noise path", () => {
     const idealResult = executeCircuit({
       backend: "density-cpu",
@@ -278,6 +352,33 @@ describe("DensityCpuCircuitExecutor", () => {
     const densitySamples = sampleCircuitBitstrings(circuit, 8, "density-cpu");
 
     expect(densitySamples).toEqual(denseSamples);
+  });
+
+  it("matches dense-cpu sampled bitstrings across deterministic randomized ideal circuits", () => {
+    const randomSpy = vi.spyOn(Math, "random");
+    const cases = [
+      { seed: 101, qubitCount: 1 as const, operationCount: 6, shots: 24 },
+      { seed: 103, qubitCount: 1 as const, operationCount: 8, shots: 24 },
+      { seed: 107, qubitCount: 2 as const, operationCount: 5, shots: 32 },
+      { seed: 109, qubitCount: 2 as const, operationCount: 7, shots: 32 },
+      { seed: 113, qubitCount: 2 as const, operationCount: 9, shots: 32 },
+      { seed: 127, qubitCount: 2 as const, operationCount: 11, shots: 32 },
+    ];
+
+    for (const testCase of cases) {
+      const circuit = buildRandomCircuit(testCase.seed, testCase.qubitCount, testCase.operationCount);
+
+      randomSpy.mockImplementation(createSeededRandom(testCase.seed * 17));
+      const denseSamples = sampleCircuitBitstrings(circuit, testCase.shots, "dense-cpu");
+
+      randomSpy.mockImplementation(createSeededRandom(testCase.seed * 17));
+      const densitySamples = sampleCircuitBitstrings(circuit, testCase.shots, "density-cpu");
+
+      expect(
+        densitySamples,
+        `seed=${testCase.seed} qubits=${testCase.qubitCount} ops=${testCase.operationCount}`,
+      ).toEqual(denseSamples);
+    }
   });
 
   it("samples from the noisy density path using depolarized populations", () => {
