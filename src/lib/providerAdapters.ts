@@ -5,6 +5,7 @@ import {
 } from "./algorithms";
 import {
   getBackendTargetDescriptor,
+  isImplementedBackendTarget,
   type BackendProvider,
   type BackendTargetId,
 } from "./backendTargets";
@@ -93,7 +94,14 @@ const toSamplingJobResult = (estimate: SampledMetricEstimate): SamplingExecution
   bitstrings: estimate.bitstrings,
 });
 
-const runLocalSamplingJob = (request: SamplingExecutionJobRequest): SamplingExecutionJobResult => {
+const runSamplingJobOnBackend = (
+  request: SamplingExecutionJobRequest,
+  backend: SamplingExecutionJobRequest["targetId"],
+): SamplingExecutionJobResult => {
+  if (!isImplementedBackendTarget(backend)) {
+    throw new Error(`Local execution target "${backend}" is not backed by an implemented local executor.`);
+  }
+
   if (request.algorithm === "qaoa") {
     return toSamplingJobResult(
       sampleQaoaMeasurementEstimate(
@@ -102,13 +110,25 @@ const runLocalSamplingJob = (request: SamplingExecutionJobRequest): SamplingExec
         request.gammas,
         request.betas,
         request.shots,
-        "dense-cpu",
+        backend,
+        request.noiseModel ?? { kind: "ideal" },
       ),
     );
   }
 
-  return toSamplingJobResult(sampleVqeMeasurementEstimate(request.thetas, request.molecule, request.shots, "dense-cpu"));
+  return toSamplingJobResult(
+    sampleVqeMeasurementEstimate(
+      request.thetas,
+      request.molecule,
+      request.shots,
+      backend,
+      request.noiseModel ?? { kind: "ideal" },
+    ),
+  );
 };
+
+const runLocalSamplingJob = (request: SamplingExecutionJobRequest): SamplingExecutionJobResult =>
+  runSamplingJobOnBackend(request, request.targetId);
 
 const makeQueuedPollingState = (
   submittedAt: string,
@@ -288,7 +308,7 @@ const stubIonQTransport: IonQProviderTransport = {
       jobId: job.polling.externalJobId ?? `ionq_${job.id}`,
       status: "ready",
       statusDetail: "Retrieved final IonQ result payload.",
-      result: runLocalSamplingJob(job.request),
+      result: runSamplingJobOnBackend(job.request, "dense-cpu"),
     };
   },
 };

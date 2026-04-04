@@ -6,6 +6,7 @@ import {
   type BackendKind,
   type CircuitOperation,
   type ExecutableCircuit,
+  type NoiseModel,
   type Observable,
 } from "./circuitExecutor";
 import { parseAndValidateEdge } from "./utils";
@@ -102,13 +103,14 @@ const evaluateQaoaObjectiveWithSingleGateShift = (
   betas: number[],
   shift?: QaoaShift,
   backend: BackendKind = "dense-cpu",
+  noiseModel: NoiseModel = { kind: "ideal" },
 ): number => {
   if (nodeCount < 1) return 0;
 
   const edgePairs = getValidatedEdgePairs(nodeCount, edges);
   const circuit = buildQaoaExecutionCircuit(nodeCount, edgePairs, gammas, betas, shift);
   const observables = buildQaoaCostObservables(edgePairs);
-  const expectationValues = evaluateCircuitObservables(circuit, observables, backend);
+  const expectationValues = evaluateCircuitObservables(circuit, observables, backend, noiseModel);
   const cost = expectationValues.reduce((sum, expectation) => sum + (1 - expectation) / 2, 0);
   return -cost;
 };
@@ -119,8 +121,9 @@ export const evaluateQaoaCost = (
   gammas: number[],
   betas: number[],
   backend: BackendKind = "dense-cpu",
+  noiseModel: NoiseModel = { kind: "ideal" },
 ): number => {
-  return -evaluateQaoaObjectiveWithSingleGateShift(nodeCount, edges, gammas, betas, undefined, backend);
+  return -evaluateQaoaObjectiveWithSingleGateShift(nodeCount, edges, gammas, betas, undefined, backend, noiseModel);
 };
 
 export const buildVqeExecutionCircuit = (thetas: number[]): ExecutableCircuit => {
@@ -152,12 +155,13 @@ export const evaluateVqeEnergy = (
   thetas: number[],
   moleculeKey: MoleculeKey,
   backend: BackendKind = "dense-cpu",
+  noiseModel: NoiseModel = { kind: "ideal" },
 ): number => {
   const circuit = buildVqeExecutionCircuit(thetas);
   const {
     coeffs: { g0, g1, g2, g3, g4 },
   } = MOLECULES[moleculeKey];
-  const [z0, z1, zz01, xx01] = evaluateCircuitObservables(circuit, VQE_OBSERVABLES, backend);
+  const [z0, z1, zz01, xx01] = evaluateCircuitObservables(circuit, VQE_OBSERVABLES, backend, noiseModel);
 
   return g0 + g1 * z0 + g2 * z1 + g3 * zz01 + g4 * xx01;
 };
@@ -199,12 +203,13 @@ export const sampleQaoaBitstrings = (
   betas: number[],
   shots: number,
   backend: BackendKind = "dense-cpu",
+  noiseModel: NoiseModel = { kind: "ideal" },
 ): string[] => {
   if (nodeCount < 1) return [];
 
   const edgePairs = getValidatedEdgePairs(nodeCount, edges);
   const circuit = buildQaoaExecutionCircuit(nodeCount, edgePairs, gammas, betas);
-  return sampleCircuitBitstrings(circuit, shots, backend);
+  return sampleCircuitBitstrings(circuit, shots, backend, noiseModel);
 };
 
 export const sampleQaoaMeasurementEstimate = (
@@ -214,8 +219,9 @@ export const sampleQaoaMeasurementEstimate = (
   betas: number[],
   shots: number,
   backend: BackendKind = "dense-cpu",
+  noiseModel: NoiseModel = { kind: "ideal" },
 ): SampledMetricEstimate => {
-  const bitstrings = sampleQaoaBitstrings(nodeCount, edges, gammas, betas, shots, backend);
+  const bitstrings = sampleQaoaBitstrings(nodeCount, edges, gammas, betas, shots, backend, noiseModel);
   return {
     bitstrings,
     estimatedValue: estimateQaoaCostFromBitstrings(nodeCount, edges, bitstrings),
@@ -227,9 +233,10 @@ export const sampleVqeBitstrings = (
   thetas: number[],
   shots: number,
   backend: BackendKind = "dense-cpu",
+  noiseModel: NoiseModel = { kind: "ideal" },
 ): string[] => {
   const circuit = buildVqeExecutionCircuit(thetas);
-  return sampleCircuitBitstrings(circuit, shots, backend);
+  return sampleCircuitBitstrings(circuit, shots, backend, noiseModel);
 };
 
 export const sampleVqeMeasurementEstimate = (
@@ -237,8 +244,9 @@ export const sampleVqeMeasurementEstimate = (
   moleculeKey: MoleculeKey,
   shots: number,
   backend: BackendKind = "dense-cpu",
+  noiseModel: NoiseModel = { kind: "ideal" },
 ): SampledMetricEstimate => {
-  const zBasisBitstrings = sampleVqeBitstrings(thetas, shots, backend);
+  const zBasisBitstrings = sampleVqeBitstrings(thetas, shots, backend, noiseModel);
   const xxMeasurementCircuit: ExecutableCircuit = {
     qubitCount: 2,
     operations: [
@@ -247,7 +255,7 @@ export const sampleVqeMeasurementEstimate = (
       { kind: "ry", qubit: 1, theta: -Math.PI / 2 },
     ],
   };
-  const xxBasisBitstrings = sampleCircuitBitstrings(xxMeasurementCircuit, shots, backend);
+  const xxBasisBitstrings = sampleCircuitBitstrings(xxMeasurementCircuit, shots, backend, noiseModel);
 
   return {
     bitstrings: zBasisBitstrings,
@@ -277,6 +285,8 @@ export const computeQaoaObjectiveGradients = (
   edges: string[],
   gammas: number[],
   betas: number[],
+  backend: BackendKind = "dense-cpu",
+  noiseModel: NoiseModel = { kind: "ideal" },
 ): { gammaGrads: number[]; betaGrads: number[] } => {
   const layers = Math.max(gammas.length, betas.length);
   const gammaGrads = Array.from({ length: layers }, () => 0);
@@ -289,13 +299,13 @@ export const computeQaoaObjectiveGradients = (
         layer,
         edgeIndex,
         sign: 1,
-      });
+      }, backend, noiseModel);
       const minus = evaluateQaoaObjectiveWithSingleGateShift(nodeCount, edges, gammas, betas, {
         kind: "gamma",
         layer,
         edgeIndex,
         sign: -1,
-      });
+      }, backend, noiseModel);
       gammaGrads[layer] += 0.5 * (plus - minus);
     }
 
@@ -305,13 +315,13 @@ export const computeQaoaObjectiveGradients = (
         layer,
         qubit,
         sign: 1,
-      });
+      }, backend, noiseModel);
       const minus = evaluateQaoaObjectiveWithSingleGateShift(nodeCount, edges, gammas, betas, {
         kind: "beta",
         layer,
         qubit,
         sign: -1,
-      });
+      }, backend, noiseModel);
       betaGrads[layer] += plus - minus;
     }
   }
@@ -319,13 +329,18 @@ export const computeQaoaObjectiveGradients = (
   return { gammaGrads, betaGrads };
 };
 
-export const computeVqeObjectiveGradients = (thetas: number[], molecule: MoleculeKey): number[] =>
+export const computeVqeObjectiveGradients = (
+  thetas: number[],
+  molecule: MoleculeKey,
+  backend: BackendKind = "dense-cpu",
+  noiseModel: NoiseModel = { kind: "ideal" },
+): number[] =>
   thetas.map((_, idx) => {
     const plus = [...thetas];
     const minus = [...thetas];
     plus[idx] += Math.PI / 2;
     minus[idx] -= Math.PI / 2;
-    const fPlus = evaluateVqeEnergy(plus, molecule);
-    const fMinus = evaluateVqeEnergy(minus, molecule);
+    const fPlus = evaluateVqeEnergy(plus, molecule, backend, noiseModel);
+    const fMinus = evaluateVqeEnergy(minus, molecule, backend, noiseModel);
     return 0.5 * (fPlus - fMinus);
   });

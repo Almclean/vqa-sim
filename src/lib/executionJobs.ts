@@ -1,5 +1,5 @@
 import { canBackendTargetAcceptCircuit, type BackendTargetId } from "./backendTargets";
-import type { ExecutableCircuit } from "./circuitExecutor";
+import type { ExecutableCircuit, NoiseModel } from "./circuitExecutor";
 import { type MoleculeKey } from "../data/molecules";
 import type { Algorithm } from "../types";
 import { getExecutionProviderAdapterForTarget } from "./providerAdapters";
@@ -15,6 +15,7 @@ export type SamplingExecutionJobRequest =
       circuit: ExecutableCircuit;
       algorithm: "qaoa";
       shots: number;
+      noiseModel?: NoiseModel;
       nodeCount: number;
       edges: string[];
       gammas: number[];
@@ -25,6 +26,7 @@ export type SamplingExecutionJobRequest =
       circuit: ExecutableCircuit;
       algorithm: "vqe";
       shots: number;
+      noiseModel?: NoiseModel;
       thetas: number[];
       molecule: MoleculeKey;
     };

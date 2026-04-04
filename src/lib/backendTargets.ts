@@ -49,6 +49,17 @@ const BACKEND_TARGETS: readonly BackendTargetDescriptor[] = [
     notes: "Reference in-process backend used for exact evaluation, sampling, and state-vector inspection.",
   },
   {
+    id: "density-cpu",
+    label: "Density Matrix Simulator",
+    provider: "local",
+    implementationStatus: "implemented",
+    executionMode: "local-sync",
+    supportedIntents: ["expectation-values", "shot-sampling"],
+    executorCapabilities: ["ideal-execution", "expectation-values", "shot-sampling"],
+    requiresProviderAdapter: false,
+    notes: "Local mixed-state backend for noisy execution and expectation-value sampling without state-vector access.",
+  },
+  {
     id: "ionq-simulator",
     label: "IonQ Simulator",
     provider: "ionq",

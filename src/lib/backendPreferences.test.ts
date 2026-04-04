@@ -27,6 +27,8 @@ describe("backendPreferences", () => {
     expect(loadBackendPreferences()).toEqual({
       executionTarget: "ionq-simulator",
       ionqCredentialMode: "browser-session",
+      noiseModelKind: "ideal",
+      depolarizingProbability: 0.05,
     });
   });
 
@@ -34,6 +36,8 @@ describe("backendPreferences", () => {
     const preferences: BackendPreferences = {
       executionTarget: "ionq-qpu",
       ionqCredentialMode: "server-managed",
+      noiseModelKind: "depolarizing",
+      depolarizingProbability: 0.12,
     };
 
     saveBackendPreferences(preferences);
@@ -42,6 +46,8 @@ describe("backendPreferences", () => {
       JSON.stringify({
         executionTarget: "ionq-qpu",
         ionqCredentialMode: "server-managed",
+        noiseModelKind: "depolarizing",
+        depolarizingProbability: 0.12,
       }),
     );
   });

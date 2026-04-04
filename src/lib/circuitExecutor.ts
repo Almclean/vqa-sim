@@ -1,6 +1,7 @@
+import { DensityMatrixSimulator, probabilitiesToBitstrings } from "./densityMatrixSimulator";
 import { QuantumSimulator, type ComplexAmplitude } from "./quantumSimulator";
 
-export type BackendKind = "dense-cpu";
+export type BackendKind = "dense-cpu" | "density-cpu";
 
 export type ExecutorCapability = "ideal-execution" | "expectation-values" | "shot-sampling" | "state-vector";
 
@@ -166,7 +167,7 @@ const assertValidStateVectorRequest = (stateVector?: StateVectorRequest): void =
   throw new Error(`Unsupported state-vector request kind ${(stateVector as { kind?: string }).kind ?? "unknown"}.`);
 };
 
-const assertSupportedNoiseModel = (noiseModel?: NoiseModel): void => {
+const assertValidNoiseModel = (noiseModel?: NoiseModel): void => {
   if (!noiseModel || noiseModel.kind === "ideal") return;
 
   if (!Number.isFinite(noiseModel.probability) || noiseModel.probability < 0 || noiseModel.probability > 1) {
@@ -174,10 +175,6 @@ const assertSupportedNoiseModel = (noiseModel?: NoiseModel): void => {
       `Invalid depolarizing probability ${noiseModel.probability}; expected a finite value between 0 and 1.`,
     );
   }
-
-  throw new Error(
-    `Unsupported noise model "${noiseModel.kind}" for backend "dense-cpu"; only ideal execution is currently implemented.`,
-  );
 };
 
 const probabilityOfIndex = (sim: QuantumSimulator, index: number): number => {
@@ -236,10 +233,15 @@ export class DenseCpuCircuitExecutor implements CircuitExecutor {
     noiseModel,
   }: ExecutionRequest): ExecutionResult {
     if (backend !== this.backend) {
-      throw new Error(`Unsupported backend \"${backend}\"; only \"dense-cpu\" is currently implemented.`);
+      throw new Error(`Unsupported backend "${backend}"; only "${this.backend}" is currently implemented.`);
     }
 
-    assertSupportedNoiseModel(noiseModel);
+    assertValidNoiseModel(noiseModel);
+    if (noiseModel && noiseModel.kind !== "ideal") {
+      throw new Error(
+        `Unsupported noise model "${noiseModel.kind}" for backend "${this.backend}"; only ideal execution is currently implemented.`,
+      );
+    }
     assertValidStateVectorRequest(stateVector);
 
     const sim = new QuantumSimulator(circuit.qubitCount);
@@ -293,10 +295,101 @@ export class DenseCpuCircuitExecutor implements CircuitExecutor {
 
 export const denseCpuCircuitExecutor = new DenseCpuCircuitExecutor();
 
+export class DensityCpuCircuitExecutor implements CircuitExecutor {
+  readonly backend = "density-cpu" as const;
+  readonly capabilities = ["ideal-execution", "expectation-values", "shot-sampling"] as const;
+
+  execute({
+    backend = this.backend,
+    circuit,
+    observables = [],
+    measurement,
+    stateVector,
+    noiseModel,
+  }: ExecutionRequest): ExecutionResult {
+    if (backend !== this.backend) {
+      throw new Error(`Unsupported backend "${backend}"; only "${this.backend}" is currently implemented.`);
+    }
+
+    assertValidNoiseModel(noiseModel);
+    assertValidStateVectorRequest(stateVector);
+    if (stateVector) {
+      throw new Error(`Backend "${this.backend}" does not support executor capability "state-vector".`);
+    }
+
+    const sim = new DensityMatrixSimulator(circuit.qubitCount);
+
+    const maybeApplyDepolarizingNoise = (qubits: number[]): void => {
+      if (!noiseModel || noiseModel.kind === "ideal") return;
+      for (const qubit of qubits) {
+        sim.applySingleQubitDepolarizing(qubit, noiseModel.probability);
+      }
+    };
+
+    for (const operation of circuit.operations) {
+      switch (operation.kind) {
+        case "rx":
+          sim.applyRx(operation.qubit, operation.theta);
+          maybeApplyDepolarizingNoise([operation.qubit]);
+          break;
+        case "ry":
+          sim.applyRy(operation.qubit, operation.theta);
+          maybeApplyDepolarizingNoise([operation.qubit]);
+          break;
+        case "xx":
+          sim.applyXX(operation.q1, operation.q2, operation.theta);
+          maybeApplyDepolarizingNoise([operation.q1, operation.q2]);
+          break;
+        default: {
+          const exhaustiveCheck: never = operation;
+          throw new Error(`Unsupported operation ${(exhaustiveCheck as { kind?: string }).kind ?? "unknown"}.`);
+        }
+      }
+    }
+
+    return {
+      backend,
+      expectationValues:
+        observables.length > 0
+          ? {
+              kind: "expectation-values",
+              observables,
+              values: observables.map((observable) => {
+                switch (observable.kind) {
+                  case "z":
+                    return sim.expZ(observable.qubit);
+                  case "zz":
+                    return sim.expZZ(observable.q1, observable.q2);
+                  case "xx":
+                    return sim.expXX(observable.q1, observable.q2);
+                  default: {
+                    const exhaustiveCheck: never = observable;
+                    return exhaustiveCheck;
+                  }
+                }
+              }),
+            }
+          : undefined,
+      measurement:
+        measurement?.kind === "all-qubits"
+          ? {
+              kind: "all-qubits",
+              shots: measurement.shots,
+              bitstrings: probabilitiesToBitstrings(sim.measurementProbabilities(), circuit.qubitCount, measurement.shots),
+            }
+          : undefined,
+    };
+  }
+}
+
+export const densityCpuCircuitExecutor = new DensityCpuCircuitExecutor();
+
 export const getCircuitExecutor = (backend: BackendKind): CircuitExecutor => {
   switch (backend) {
     case "dense-cpu":
       return denseCpuCircuitExecutor;
+    case "density-cpu":
+      return densityCpuCircuitExecutor;
     default: {
       const exhaustiveCheck: never = backend;
       throw new Error(`Unsupported backend \"${exhaustiveCheck}\".`);
@@ -320,17 +413,20 @@ export const evaluateCircuitObservables = (
   circuit: ExecutableCircuit,
   observables: Observable[],
   backend: BackendKind = "dense-cpu",
-): number[] => executeCircuit({ backend, circuit, observables }).expectationValues?.values ?? [];
+  noiseModel?: NoiseModel,
+): number[] => executeCircuit({ backend, circuit, observables, noiseModel }).expectationValues?.values ?? [];
 
 export const sampleCircuitBitstrings = (
   circuit: ExecutableCircuit,
   shots: number,
   backend: BackendKind = "dense-cpu",
+  noiseModel?: NoiseModel,
 ): string[] => {
   const result = executeCircuit({
     backend,
     circuit,
     measurement: { kind: "all-qubits", shots },
+    noiseModel,
   });
 
   return result.measurement?.bitstrings ?? [];

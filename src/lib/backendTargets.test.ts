@@ -10,7 +10,12 @@ import {
 
 describe("backendTargets", () => {
   it("lists implemented and planned backend targets", () => {
-    expect(listBackendTargets().map((target) => target.id)).toEqual(["dense-cpu", "ionq-simulator", "ionq-qpu"]);
+    expect(listBackendTargets().map((target) => target.id)).toEqual([
+      "dense-cpu",
+      "density-cpu",
+      "ionq-simulator",
+      "ionq-qpu",
+    ]);
   });
 
   it("describes the local reference backend", () => {
@@ -38,6 +43,7 @@ describe("backendTargets", () => {
 
   it("distinguishes implemented executor targets from planned provider targets", () => {
     expect(isImplementedBackendTarget("dense-cpu")).toBe(true);
+    expect(isImplementedBackendTarget("density-cpu")).toBe(true);
     expect(isImplementedBackendTarget("ionq-simulator")).toBe(false);
     expect(isImplementedBackendTarget("ionq-qpu")).toBe(false);
   });
@@ -45,6 +51,8 @@ describe("backendTargets", () => {
   it("tracks execution-intent support per target", () => {
     expect(supportsExecutionIntent("dense-cpu", "expectation-values")).toBe(true);
     expect(supportsExecutionIntent("dense-cpu", "state-vector")).toBe(true);
+    expect(supportsExecutionIntent("density-cpu", "shot-sampling")).toBe(true);
+    expect(supportsExecutionIntent("density-cpu", "state-vector")).toBe(false);
     expect(supportsExecutionIntent("ionq-simulator", "shot-sampling")).toBe(true);
     expect(supportsExecutionIntent("ionq-simulator", "expectation-values")).toBe(false);
     expect(supportsExecutionIntent("ionq-qpu", "state-vector")).toBe(false);
@@ -55,6 +63,20 @@ describe("backendTargets", () => {
       kind: "local-executor",
       backend: "dense-cpu",
       intent: "expectation-values",
+    });
+  });
+
+  it("describes the local noisy backend without state-vector support", () => {
+    expect(getBackendTargetDescriptor("density-cpu")).toEqual({
+      id: "density-cpu",
+      label: "Density Matrix Simulator",
+      provider: "local",
+      implementationStatus: "implemented",
+      executionMode: "local-sync",
+      supportedIntents: ["expectation-values", "shot-sampling"],
+      executorCapabilities: ["ideal-execution", "expectation-values", "shot-sampling"],
+      requiresProviderAdapter: false,
+      notes: "Local mixed-state backend for noisy execution and expectation-value sampling without state-vector access.",
     });
   });
 

@@ -23,6 +23,7 @@ import {
 import { loadBackendPreferences, saveBackendPreferences, type BackendPreferences } from "./lib/backendPreferences";
 import { getBackendTargetDescriptor } from "./lib/backendTargets";
 import { buildQaoaCircuit, buildVqeCircuit } from "./lib/circuitBuilders";
+import type { BackendKind, NoiseModel } from "./lib/circuitExecutor";
 import {
   loadExecutionJobs,
   pollExecutionJobs,
@@ -61,6 +62,8 @@ type LiveState = {
   learningRates: Record<Algorithm, number>;
   vqeDecay: VqeDecayConfig;
   vqeEarlyStop: VqeEarlyStopConfig;
+  analysisBackend: BackendKind;
+  noiseModel: NoiseModel;
   iteration: number;
 };
 
@@ -177,13 +180,39 @@ export default function App(): JSX.Element {
     () => getProviderAuthConfigurationStatus(selectedExecutionTargetAuth),
     [selectedExecutionTargetAuth],
   );
+  const analysisExecutionConfig = useMemo<{ backend: BackendKind; noiseModel: NoiseModel }>(() => {
+    if (backendPreferences.executionTarget !== "density-cpu") {
+      return {
+        backend: "dense-cpu",
+        noiseModel: { kind: "ideal" },
+      };
+    }
+
+    return {
+      backend: "density-cpu",
+      noiseModel:
+        backendPreferences.noiseModelKind === "depolarizing"
+          ? {
+              kind: "depolarizing",
+              probability: backendPreferences.depolarizingProbability,
+            }
+          : { kind: "ideal" },
+    };
+  }, [backendPreferences.depolarizingProbability, backendPreferences.executionTarget, backendPreferences.noiseModelKind]);
 
   const currentMetric = useMemo(() => {
     if (algorithm === "qaoa") {
-      return evaluateQaoaCost(nodeCount, effectiveEdges, gammas, betas);
+      return evaluateQaoaCost(
+        nodeCount,
+        effectiveEdges,
+        gammas,
+        betas,
+        analysisExecutionConfig.backend,
+        analysisExecutionConfig.noiseModel,
+      );
     }
-    return evaluateVqeEnergy(thetas, molecule);
-  }, [algorithm, betas, effectiveEdges, gammas, molecule, nodeCount, thetas]);
+    return evaluateVqeEnergy(thetas, molecule, analysisExecutionConfig.backend, analysisExecutionConfig.noiseModel);
+  }, [algorithm, analysisExecutionConfig, betas, effectiveEdges, gammas, molecule, nodeCount, thetas]);
 
   const sampledOutcomeSummary = useMemo(() => summarizeBitstrings(sampledBitstrings), [sampledBitstrings]);
   const sampledMetricDelta = sampledMetric ? sampledMetric.estimate - currentMetric : null;
@@ -246,7 +275,19 @@ export default function App(): JSX.Element {
     setSampledMetric(null);
     setSamplingError(null);
     setSamplingNotice(null);
-  }, [algorithm, betas, effectiveEdges, gammas, measurementShots, molecule, nodeCount, thetas]);
+  }, [
+    algorithm,
+    backendPreferences.depolarizingProbability,
+    backendPreferences.executionTarget,
+    backendPreferences.noiseModelKind,
+    betas,
+    effectiveEdges,
+    gammas,
+    measurementShots,
+    molecule,
+    nodeCount,
+    thetas,
+  ]);
 
   useEffect(() => {
     saveBackendPreferences(backendPreferences);
@@ -272,6 +313,8 @@ export default function App(): JSX.Element {
     learningRates,
     vqeDecay,
     vqeEarlyStop,
+    analysisBackend: analysisExecutionConfig.backend,
+    noiseModel: analysisExecutionConfig.noiseModel,
     iteration,
   });
 
@@ -287,6 +330,8 @@ export default function App(): JSX.Element {
     learningRates,
     vqeDecay,
     vqeEarlyStop,
+    analysisBackend: analysisExecutionConfig.backend,
+    noiseModel: analysisExecutionConfig.noiseModel,
     iteration,
   };
 
@@ -309,6 +354,8 @@ export default function App(): JSX.Element {
           snapshot.edges,
           currentGammas,
           currentBetas,
+          snapshot.analysisBackend,
+          snapshot.noiseModel,
         );
         const nextGammas = currentGammas.map((p, i) => p - lr * (gammaGrads[i] ?? 0));
         const nextBetas = currentBetas.map((p, i) => p - lr * (betaGrads[i] ?? 0));
@@ -316,17 +363,39 @@ export default function App(): JSX.Element {
         setGammas(nextGammas);
         setBetas(nextBetas);
 
-        const metric = evaluateQaoaCost(snapshot.nodeCount, snapshot.edges, nextGammas, nextBetas);
+        const metric = evaluateQaoaCost(
+          snapshot.nodeCount,
+          snapshot.edges,
+          nextGammas,
+          nextBetas,
+          snapshot.analysisBackend,
+          snapshot.noiseModel,
+        );
         setCostHistory((prev) => [...prev, metric].slice(-320));
       } else {
         const d = snapshot.depth;
         const currentThetas = Array.from({ length: d * 2 }, (_, i) => snapshot.thetas[i] ?? 0);
-        const currentMetricValue = evaluateVqeEnergy(currentThetas, snapshot.molecule);
-        const grads = computeVqeObjectiveGradients(currentThetas, snapshot.molecule);
+        const currentMetricValue = evaluateVqeEnergy(
+          currentThetas,
+          snapshot.molecule,
+          snapshot.analysisBackend,
+          snapshot.noiseModel,
+        );
+        const grads = computeVqeObjectiveGradients(
+          currentThetas,
+          snapshot.molecule,
+          snapshot.analysisBackend,
+          snapshot.noiseModel,
+        );
         const nextThetas = currentThetas.map((p, i) => p - lr * grads[i]);
         setThetas(nextThetas);
 
-        const metric = evaluateVqeEnergy(nextThetas, snapshot.molecule);
+        const metric = evaluateVqeEnergy(
+          nextThetas,
+          snapshot.molecule,
+          snapshot.analysisBackend,
+          snapshot.noiseModel,
+        );
         setCostHistory((prev) => [...prev, metric].slice(-320));
 
         if (snapshot.vqeEarlyStop.enabled && nextIteration >= snapshot.vqeEarlyStop.minIterations) {
@@ -427,11 +496,20 @@ export default function App(): JSX.Element {
       const b = makeDefaultBetas(depth);
       setGammas(g);
       setBetas(b);
-      setCostHistory([evaluateQaoaCost(nodeCount, effectiveEdges, g, b)]);
+      setCostHistory([
+        evaluateQaoaCost(
+          nodeCount,
+          effectiveEdges,
+          g,
+          b,
+          analysisExecutionConfig.backend,
+          analysisExecutionConfig.noiseModel,
+        ),
+      ]);
     } else {
       const t = makeDefaultThetas(depth);
       setThetas(t);
-      setCostHistory([evaluateVqeEnergy(t, molecule)]);
+      setCostHistory([evaluateVqeEnergy(t, molecule, analysisExecutionConfig.backend, analysisExecutionConfig.noiseModel)]);
     }
 
     setIteration(0);
@@ -449,6 +527,7 @@ export default function App(): JSX.Element {
               circuit: currentExecutableCircuit,
               algorithm: "qaoa" as const,
               shots: measurementShots,
+              noiseModel: analysisExecutionConfig.noiseModel,
               nodeCount,
               edges: effectiveEdges,
               gammas,
@@ -459,6 +538,7 @@ export default function App(): JSX.Element {
               circuit: currentExecutableCircuit,
               algorithm: "vqe" as const,
               shots: measurementShots,
+              noiseModel: analysisExecutionConfig.noiseModel,
               thetas,
               molecule,
             };
@@ -550,6 +630,8 @@ export default function App(): JSX.Element {
             <ExecutionBackendPanel
               executionTarget={backendPreferences.executionTarget}
               ionqCredentialMode={backendPreferences.ionqCredentialMode}
+              noiseModelKind={backendPreferences.noiseModelKind}
+              depolarizingProbability={backendPreferences.depolarizingProbability}
               ionqApiKey={providerSessionCredentials.ionqApiKey}
               ionqAuthConfigured={selectedExecutionTargetAuthStatus.configured}
               onExecutionTargetChange={(executionTarget) =>
@@ -562,6 +644,18 @@ export default function App(): JSX.Element {
                 setBackendPreferences((prev) => ({
                   ...prev,
                   ionqCredentialMode,
+                }))
+              }
+              onNoiseModelKindChange={(noiseModelKind) =>
+                setBackendPreferences((prev) => ({
+                  ...prev,
+                  noiseModelKind,
+                }))
+              }
+              onDepolarizingProbabilityChange={(depolarizingProbability) =>
+                setBackendPreferences((prev) => ({
+                  ...prev,
+                  depolarizingProbability,
                 }))
               }
               onIonqApiKeyChange={(ionqApiKey) =>
