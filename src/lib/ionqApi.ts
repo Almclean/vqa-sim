@@ -53,8 +53,9 @@ export type IonQJobStatus = "submitted" | "ready" | "running" | "completed" | "f
 export type IonQJobDetailsResponse = {
   id: string;
   status: IonQJobStatus;
-  target: string;
-  shots: number;
+  request?: number;
+  target?: string;
+  shots?: number;
   results_url?: string;
   children?: string[];
   failure?: {
@@ -66,7 +67,9 @@ export type IonQJobDetailsResponse = {
   } | null;
 };
 
-export type IonQResultsResponse = Record<string, Record<string, number>>;
+export type IonQProbabilityMap = Record<string, number>;
+
+export type IonQResultsResponse = IonQProbabilityMap | Record<string, IonQProbabilityMap>;
 
 export class IonQApiError extends Error {
   readonly status: number;
@@ -215,10 +218,15 @@ export const decodeIonQResultsToSamplingResult = (
   results: IonQResultsResponse,
   childJobIds?: string[],
 ): SamplingExecutionJobResult => {
+  const isProbabilityMap = (value: IonQResultsResponse): value is IonQProbabilityMap =>
+    Object.values(value).every((entry) => typeof entry === "number");
+
   const orderedResultEntries =
     childJobIds && childJobIds.length > 0
-      ? childJobIds.map((jobId) => results[jobId] ?? {})
-      : Object.values(results);
+      ? childJobIds.map((jobId) => (!isProbabilityMap(results) ? results[jobId] ?? {} : {}))
+      : isProbabilityMap(results)
+        ? [results]
+        : Object.values(results);
 
   if (request.algorithm === "qaoa") {
     const primaryResult = orderedResultEntries[0];

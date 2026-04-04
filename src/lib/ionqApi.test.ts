@@ -80,4 +80,28 @@ describe("ionqApi", () => {
     expect(result.bitstrings.every((bitstring) => bitstring === "00" || bitstring === "11")).toBe(true);
     expect(typeof result.estimate).toBe("number");
   });
+
+  it("decodes a flat single-circuit IonQ probability map", () => {
+    const request = {
+      targetId: "ionq-simulator" as const,
+      circuit: buildQaoaExecutionCircuit(2, [[0, 1]], [0.4], [0.2]),
+      algorithm: "qaoa" as const,
+      shots: 16,
+      nodeCount: 2,
+      edges: ["0-1"],
+      gammas: [0.4],
+      betas: [0.2],
+    };
+
+    const result = decodeIonQResultsToSamplingResult(request, {
+      "0": 0.32,
+      "1": 0.18,
+      "2": 0.18,
+      "3": 0.32,
+    });
+
+    expect(result.totalShotsUsed).toBe(16);
+    expect(result.bitstrings).toHaveLength(16);
+    expect(result.estimate).toBeGreaterThan(0);
+  });
 });

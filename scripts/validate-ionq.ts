@@ -29,8 +29,9 @@ const submission = await createIonQJob(request, apiKey);
 console.log("submitted", {
   id: submission.id,
   status: submission.status,
-  target: submission.target,
-  shots: submission.shots,
+  request: submission.request ?? null,
+  target: submission.target ?? null,
+  shots: submission.shots ?? null,
 });
 
 let attempts = 0;
