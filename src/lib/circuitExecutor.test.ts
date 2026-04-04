@@ -259,6 +259,44 @@ describe("DensityCpuCircuitExecutor", () => {
     expect(noisyResult.expectationValues?.values[0]).toBeCloseTo(-0.6, 9);
   });
 
+  it("matches dense-cpu sampling in ideal mode for shared random draws", () => {
+    const circuit: ExecutableCircuit = {
+      qubitCount: 2,
+      operations: [
+        { kind: "ry", qubit: 0, theta: Math.PI / 2 },
+        { kind: "rx", qubit: 1, theta: Math.PI / 3 },
+        { kind: "xx", q1: 0, q2: 1, theta: Math.PI / 4 },
+      ],
+    };
+    const sampleSequence = [0.02, 0.18, 0.33, 0.51, 0.68, 0.82, 0.94, 0.99];
+
+    vi.spyOn(Math, "random").mockImplementation(() => sampleSequence.shift() ?? 0.02);
+    const denseSamples = sampleCircuitBitstrings(circuit, 8, "dense-cpu");
+
+    const densitySequence = [0.02, 0.18, 0.33, 0.51, 0.68, 0.82, 0.94, 0.99];
+    vi.spyOn(Math, "random").mockImplementation(() => densitySequence.shift() ?? 0.02);
+    const densitySamples = sampleCircuitBitstrings(circuit, 8, "density-cpu");
+
+    expect(densitySamples).toEqual(denseSamples);
+  });
+
+  it("samples from the noisy density path using depolarized populations", () => {
+    const samples = [0.1, 0.19, 0.21, 0.79, 0.81];
+    vi.spyOn(Math, "random").mockImplementation(() => samples.shift() ?? 0.1);
+
+    expect(
+      sampleCircuitBitstrings(
+        {
+          qubitCount: 1,
+          operations: [{ kind: "rx", qubit: 0, theta: Math.PI }],
+        },
+        5,
+        "density-cpu",
+        { kind: "depolarizing", probability: 0.3 },
+      ),
+    ).toEqual(["0", "0", "1", "1", "1"]);
+  });
+
   it("rejects state-vector requests for the density backend", () => {
     expect(() =>
       executeCircuit({
