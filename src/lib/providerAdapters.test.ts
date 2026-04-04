@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildQaoaExecutionCircuit, buildVqeExecutionCircuit } from "./algorithms";
 import {
   getExecutionProviderAdapter,
@@ -47,6 +47,8 @@ const makeVqeRequest = () => ({
 
 afterEach(() => {
   resetIonQProviderTransport();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe("providerAdapters", () => {
@@ -57,9 +59,9 @@ describe("providerAdapters", () => {
     expect(getExecutionProviderAdapterForTarget("ionq-qpu").provider).toBe("ionq");
   });
 
-  it("submits local jobs through the local adapter as immediate completions", () => {
+  it("submits local jobs through the local adapter as immediate completions", async () => {
     const adapter = getExecutionProviderAdapter("local");
-    const job = adapter.submitSamplingJob(makeQaoaRequest(), "2026-04-02T12:00:00.000Z", LOCAL_AUTH);
+    const job = await adapter.submitSamplingJob(makeQaoaRequest(), "2026-04-02T12:00:00.000Z", LOCAL_AUTH);
 
     expect(job.status).toBe("completed");
     expect(job.queueBehavior).toBe("instant");
@@ -67,10 +69,10 @@ describe("providerAdapters", () => {
     expect(job.submittedAt).toBe("2026-04-02T12:00:00.000Z");
   });
 
-  it("stores the provider job identifier when IonQ accepts a submission", () => {
+  it("stores the provider job identifier when IonQ accepts a submission", async () => {
     const transport: IonQProviderTransport = {
       provider: "ionq",
-      submitSamplingJob() {
+      async submitSamplingJob() {
         return {
           provider: "ionq",
           jobId: "ionq_job_123",
@@ -78,17 +80,17 @@ describe("providerAdapters", () => {
           statusDetail: "IonQ accepted the job.",
         };
       },
-      getJobStatus() {
+      async getJobStatus() {
         throw new Error("getJobStatus should not be called in this test.");
       },
-      getJobResult() {
+      async getJobResult() {
         throw new Error("getJobResult should not be called in this test.");
       },
     };
     setIonQProviderTransport(transport);
 
     const adapter = getExecutionProviderAdapter("ionq");
-    const job = adapter.submitSamplingJob(makeVqeRequest(), "2026-04-02T12:00:00.000Z", IONQ_BROWSER_SESSION_AUTH);
+    const job = await adapter.submitSamplingJob(makeVqeRequest(), "2026-04-02T12:00:00.000Z", IONQ_BROWSER_SESSION_AUTH);
 
     expect(job.status).toBe("queued");
     expect(job.queueBehavior).toBe("provider-queue");
@@ -98,17 +100,17 @@ describe("providerAdapters", () => {
     expect(job.polling.providerStatus).toBe("submitted");
   });
 
-  it("maps IonQ ready status into the internal queued lifecycle", () => {
+  it("maps IonQ ready status into the internal queued lifecycle", async () => {
     const transport: IonQProviderTransport = {
       provider: "ionq",
-      submitSamplingJob() {
+      async submitSamplingJob() {
         return {
           provider: "ionq",
           jobId: "ionq_job_123",
           status: "submitted",
         };
       },
-      getJobStatus() {
+      async getJobStatus() {
         return {
           provider: "ionq",
           jobId: "ionq_job_123",
@@ -116,15 +118,15 @@ describe("providerAdapters", () => {
           statusDetail: "IonQ has accepted the job but has not started execution yet.",
         };
       },
-      getJobResult() {
+      async getJobResult() {
         throw new Error("getJobResult should not be called in this test.");
       },
     };
     setIonQProviderTransport(transport);
 
     const adapter = getExecutionProviderAdapter("ionq");
-    const queuedJob = adapter.submitSamplingJob(makeVqeRequest(), "2026-04-02T12:00:00.000Z", IONQ_BROWSER_SESSION_AUTH);
-    const updatedJob = adapter.pollJob(queuedJob, "2026-04-02T12:30:00.000Z", IONQ_BROWSER_SESSION_AUTH);
+    const queuedJob = await adapter.submitSamplingJob(makeVqeRequest(), "2026-04-02T12:00:00.000Z", IONQ_BROWSER_SESSION_AUTH);
+    const updatedJob = await adapter.pollJob(queuedJob, "2026-04-02T12:30:00.000Z", IONQ_BROWSER_SESSION_AUTH);
 
     expect(updatedJob.status).toBe("queued");
     expect(updatedJob.statusDetail).toMatch(/has accepted the job/i);
@@ -134,52 +136,52 @@ describe("providerAdapters", () => {
     expect(updatedJob.polling.nextSuggestedPollAt).toBe("2026-04-02T13:00:00.000Z");
   });
 
-  it("maps IonQ started status into the internal running lifecycle", () => {
+  it("maps IonQ running status into the internal running lifecycle", async () => {
     const transport: IonQProviderTransport = {
       provider: "ionq",
-      submitSamplingJob() {
+      async submitSamplingJob() {
         return {
           provider: "ionq",
           jobId: "ionq_job_123",
           status: "submitted",
         };
       },
-      getJobStatus() {
+      async getJobStatus() {
         return {
           provider: "ionq",
           jobId: "ionq_job_123",
-          status: "started",
+          status: "running",
           statusDetail: "IonQ started execution on the selected backend.",
         };
       },
-      getJobResult() {
+      async getJobResult() {
         throw new Error("getJobResult should not be called in this test.");
       },
     };
     setIonQProviderTransport(transport);
 
     const adapter = getExecutionProviderAdapter("ionq");
-    const queuedJob = adapter.submitSamplingJob(makeVqeRequest(), "2026-04-02T12:00:00.000Z", IONQ_BROWSER_SESSION_AUTH);
-    const runningJob = adapter.pollJob(queuedJob, "2026-04-02T12:30:00.000Z", IONQ_BROWSER_SESSION_AUTH);
+    const queuedJob = await adapter.submitSamplingJob(makeVqeRequest(), "2026-04-02T12:00:00.000Z", IONQ_BROWSER_SESSION_AUTH);
+    const runningJob = await adapter.pollJob(queuedJob, "2026-04-02T12:30:00.000Z", IONQ_BROWSER_SESSION_AUTH);
 
     expect(runningJob.status).toBe("running");
     expect(runningJob.startedAt).toBe("2026-04-02T12:30:00.000Z");
     expect(runningJob.polling.attemptCount).toBe(1);
     expect(runningJob.polling.externalJobId).toBe("ionq_job_123");
-    expect(runningJob.polling.providerStatus).toBe("started");
+    expect(runningJob.polling.providerStatus).toBe("running");
   });
 
-  it("ingests completed provider payloads into the internal job result shape", () => {
+  it("ingests completed provider payloads into the internal job result shape", async () => {
     const transport: IonQProviderTransport = {
       provider: "ionq",
-      submitSamplingJob() {
+      async submitSamplingJob() {
         return {
           provider: "ionq",
           jobId: "ionq_job_123",
           status: "submitted",
         };
       },
-      getJobStatus() {
+      async getJobStatus() {
         return {
           provider: "ionq",
           jobId: "ionq_job_123",
@@ -192,15 +194,15 @@ describe("providerAdapters", () => {
           },
         };
       },
-      getJobResult() {
+      async getJobResult() {
         throw new Error("getJobResult should not be called when the status payload already includes results.");
       },
     };
     setIonQProviderTransport(transport);
 
     const adapter = getExecutionProviderAdapter("ionq");
-    const queuedJob = adapter.submitSamplingJob(makeVqeRequest(), "2026-04-02T12:00:00.000Z", IONQ_BROWSER_SESSION_AUTH);
-    const completedJob = adapter.pollJob(queuedJob, "2026-04-02T14:30:00.000Z", IONQ_BROWSER_SESSION_AUTH);
+    const queuedJob = await adapter.submitSamplingJob(makeVqeRequest(), "2026-04-02T12:00:00.000Z", IONQ_BROWSER_SESSION_AUTH);
+    const completedJob = await adapter.pollJob(queuedJob, "2026-04-02T14:30:00.000Z", IONQ_BROWSER_SESSION_AUTH);
 
     expect(completedJob.status).toBe("completed");
     expect(completedJob.completedAt).toBe("2026-04-02T14:30:00.000Z");
@@ -213,17 +215,17 @@ describe("providerAdapters", () => {
     expect(completedJob.polling.providerStatus).toBe("completed");
   });
 
-  it("maps failed provider statuses into failed jobs with surfaced provider errors", () => {
+  it("maps failed provider statuses into failed jobs with surfaced provider errors", async () => {
     const transport: IonQProviderTransport = {
       provider: "ionq",
-      submitSamplingJob() {
+      async submitSamplingJob() {
         return {
           provider: "ionq",
           jobId: "ionq_job_123",
           status: "submitted",
         };
       },
-      getJobStatus() {
+      async getJobStatus() {
         return {
           provider: "ionq",
           jobId: "ionq_job_123",
@@ -232,15 +234,15 @@ describe("providerAdapters", () => {
           errorMessage: "Unsupported gate set for target backend.",
         };
       },
-      getJobResult() {
+      async getJobResult() {
         throw new Error("getJobResult should not be called in this test.");
       },
     };
     setIonQProviderTransport(transport);
 
     const adapter = getExecutionProviderAdapter("ionq");
-    const queuedJob = adapter.submitSamplingJob(makeVqeRequest(), "2026-04-02T12:00:00.000Z", IONQ_BROWSER_SESSION_AUTH);
-    const failedJob = adapter.pollJob(queuedJob, "2026-04-02T12:45:00.000Z", IONQ_BROWSER_SESSION_AUTH);
+    const queuedJob = await adapter.submitSamplingJob(makeVqeRequest(), "2026-04-02T12:00:00.000Z", IONQ_BROWSER_SESSION_AUTH);
+    const failedJob = await adapter.pollJob(queuedJob, "2026-04-02T12:45:00.000Z", IONQ_BROWSER_SESSION_AUTH);
 
     expect(failedJob.status).toBe("failed");
     expect(failedJob.statusDetail).toBe("IonQ rejected the job after validation.");
@@ -249,17 +251,17 @@ describe("providerAdapters", () => {
     expect(failedJob.polling.providerStatus).toBe("failed");
   });
 
-  it("keeps polling when provider execution is complete but final result retrieval is still pending", () => {
+  it("keeps polling when provider execution is complete but final result retrieval is still pending", async () => {
     const transport: IonQProviderTransport = {
       provider: "ionq",
-      submitSamplingJob() {
+      async submitSamplingJob() {
         return {
           provider: "ionq",
           jobId: "ionq_job_123",
           status: "submitted",
         };
       },
-      getJobStatus() {
+      async getJobStatus() {
         return {
           provider: "ionq",
           jobId: "ionq_job_123",
@@ -267,7 +269,7 @@ describe("providerAdapters", () => {
           statusDetail: "IonQ completed quantum execution.",
         };
       },
-      getJobResult() {
+      async getJobResult() {
         return {
           provider: "ionq",
           jobId: "ionq_job_123",
@@ -279,8 +281,8 @@ describe("providerAdapters", () => {
     setIonQProviderTransport(transport);
 
     const adapter = getExecutionProviderAdapter("ionq");
-    const queuedJob = adapter.submitSamplingJob(makeVqeRequest(), "2026-04-02T12:00:00.000Z", IONQ_BROWSER_SESSION_AUTH);
-    const retrievalPendingJob = adapter.pollJob(queuedJob, "2026-04-02T14:30:00.000Z", IONQ_BROWSER_SESSION_AUTH);
+    const queuedJob = await adapter.submitSamplingJob(makeVqeRequest(), "2026-04-02T12:00:00.000Z", IONQ_BROWSER_SESSION_AUTH);
+    const retrievalPendingJob = await adapter.pollJob(queuedJob, "2026-04-02T14:30:00.000Z", IONQ_BROWSER_SESSION_AUTH);
 
     expect(retrievalPendingJob.status).toBe("running");
     expect(retrievalPendingJob.polling.providerStatus).toBe("completed");
@@ -289,23 +291,80 @@ describe("providerAdapters", () => {
     expect(retrievalPendingJob.result).toBeUndefined();
   });
 
-  it("rejects IonQ browser-session submission when the tab has no API key", () => {
+  it("rejects IonQ browser-session submission when the tab has no API key", async () => {
     const adapter = getExecutionProviderAdapter("ionq");
 
-    expect(() =>
+    await expect(
       adapter.submitSamplingJob(makeVqeRequest(), "2026-04-02T12:00:00.000Z", {
         provider: "ionq",
         mode: "browser-session",
         apiKey: "",
       }),
-    ).toThrow(/requires an api key/i);
+    ).rejects.toThrow(/requires an api key/i);
   });
 
-  it("allows server-managed IonQ auth without a browser secret", () => {
+  it("allows server-managed IonQ auth without a browser secret", async () => {
     const adapter = getExecutionProviderAdapter("ionq");
-    const job = adapter.submitSamplingJob(makeVqeRequest(), "2026-04-02T12:00:00.000Z", IONQ_SERVER_MANAGED_AUTH);
+    const job = await adapter.submitSamplingJob(makeVqeRequest(), "2026-04-02T12:00:00.000Z", IONQ_SERVER_MANAGED_AUTH);
 
     expect(job.status).toBe("queued");
     expect(job.statusDetail).toMatch(/server-side execution layer/i);
+  });
+
+  it("uses the real IonQ browser transport when browser-session auth is selected", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            id: "ionq_real_job",
+            status: "submitted",
+            target: "simulator",
+            shots: 32,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            id: "ionq_real_job",
+            status: "completed",
+            target: "simulator",
+            shots: 32,
+            children: ["child-z", "child-xx"],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            "child-z": { "0": 0.5, "3": 0.5 },
+            "child-xx": { "0": 1 },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const adapter = getExecutionProviderAdapter("ionq");
+    const queuedJob = await adapter.submitSamplingJob(makeVqeRequest(), "2026-04-02T12:00:00.000Z", IONQ_BROWSER_SESSION_AUTH);
+    const completedJob = await adapter.pollJob(queuedJob, "2026-04-02T12:30:00.000Z", IONQ_BROWSER_SESSION_AUTH);
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("https://api.ionq.co/v0.3/jobs");
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+      method: "POST",
+      headers: expect.objectContaining({
+        Authorization: "apiKey test-ionq-key",
+      }),
+    });
+    expect(fetchMock.mock.calls[1]?.[0]).toBe("https://api.ionq.co/v0.3/jobs/ionq_real_job");
+    expect(fetchMock.mock.calls[2]?.[0]).toBe("https://api.ionq.co/v0.3/jobs/ionq_real_job/results");
+    expect(completedJob.status).toBe("completed");
+    expect(completedJob.polling.providerStatus).toBe("completed");
+    expect(completedJob.polling.providerChildJobIds).toEqual(["child-z", "child-xx"]);
+    expect(completedJob.result?.bitstrings).toHaveLength(32);
+    expect(completedJob.result?.totalShotsUsed).toBe(64);
   });
 });

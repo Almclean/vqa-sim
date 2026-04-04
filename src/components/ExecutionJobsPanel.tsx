@@ -2,9 +2,11 @@ import type { ExecutionJobRecord } from "../lib/executionJobs";
 
 type ExecutionJobsPanelProps = {
   jobs: ExecutionJobRecord[];
+  busy: boolean;
+  retryingJobId: string | null;
   onClearHistory: () => void;
-  onPollJobs: () => void;
-  onRetryJob: (jobId: string) => void;
+  onPollJobs: () => void | Promise<void>;
+  onRetryJob: (jobId: string) => void | Promise<void>;
 };
 
 const formatTimestamp = (value: string): string => {
@@ -28,7 +30,14 @@ const getStatusClassName = (status: ExecutionJobRecord["status"]): string => {
   }
 };
 
-export function ExecutionJobsPanel({ jobs, onClearHistory, onPollJobs, onRetryJob }: ExecutionJobsPanelProps): JSX.Element {
+export function ExecutionJobsPanel({
+  jobs,
+  busy,
+  retryingJobId,
+  onClearHistory,
+  onPollJobs,
+  onRetryJob,
+}: ExecutionJobsPanelProps): JSX.Element {
   const hasPollableJobs = jobs.some((job) => job.polling.resumable && (job.status === "queued" || job.status === "running"));
 
   return (
@@ -39,10 +48,10 @@ export function ExecutionJobsPanel({ jobs, onClearHistory, onPollJobs, onRetryJo
           <button
             type="button"
             onClick={onPollJobs}
-            disabled={!hasPollableJobs}
+            disabled={!hasPollableJobs || busy}
             className="rounded-md border border-cyan-800 bg-cyan-950/30 px-2 py-1 text-xs text-cyan-200 transition hover:bg-cyan-950/50 disabled:cursor-not-allowed disabled:border-neutral-700 disabled:bg-neutral-900 disabled:text-neutral-500"
           >
-            Poll Jobs
+            {busy ? "Polling..." : "Poll Jobs"}
           </button>
           <button
             type="button"
@@ -111,10 +120,16 @@ export function ExecutionJobsPanel({ jobs, onClearHistory, onPollJobs, onRetryJo
                     <button
                       type="button"
                       onClick={() => onRetryJob(job.id)}
-                      disabled={Boolean(job.supersededByJobId) || !job.request}
+                      disabled={busy || Boolean(job.supersededByJobId) || !job.request}
                       className="rounded-md border border-amber-700 bg-amber-950/30 px-2.5 py-1.5 text-xs text-amber-200 transition hover:bg-amber-950/50"
                     >
-                      {job.supersededByJobId ? "Retry Submitted" : job.request ? "Retry Job" : "Retry Unavailable"}
+                      {job.supersededByJobId
+                        ? "Retry Submitted"
+                        : retryingJobId === job.id
+                          ? "Retrying..."
+                          : job.request
+                            ? "Retry Job"
+                            : "Retry Unavailable"}
                     </button>
                   </div>
                 ) : null}
