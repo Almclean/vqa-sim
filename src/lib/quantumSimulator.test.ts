@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { MoleculeKey } from "../data/molecules";
 import {
+  sampleQaoaMeasurementEstimate,
+  sampleVqeMeasurementEstimate,
   computeQaoaObjectiveGradients,
   computeVqeObjectiveGradients,
   evaluateQaoaCost,
@@ -115,6 +117,42 @@ describe("evaluateQaoaCost", () => {
       });
     }
   });
+
+  it("moves QAOA cost toward the unstructured baseline under stronger depolarizing noise", () => {
+    const noiseLevels = [0, 0.05, 0.15, 0.3] as const;
+    const values = noiseLevels.map((probability) =>
+      evaluateQaoaCost(
+        2,
+        ["0-1"],
+        [0.7],
+        [0.35],
+        "density-cpu",
+        probability === 0 ? { kind: "ideal" } : { kind: "depolarizing", probability },
+      ),
+    );
+
+    expect(values[0]).toBeCloseTo(0.18257792702891362, 12);
+    expect(values[1]!).toBeGreaterThan(values[0]!);
+    expect(values[2]!).toBeGreaterThan(values[1]!);
+    expect(values[3]!).toBeGreaterThan(values[2]!);
+    expect(Math.abs(values[3]! - 0.5)).toBeLessThan(Math.abs(values[0]! - 0.5));
+  });
+
+  it("makes noisy QAOA shot estimates converge toward the exact noisy density value", () => {
+    const random = createSeededRandom(12345);
+    const noiseModel = { kind: "depolarizing", probability: 0.15 } as const;
+    const exact = evaluateQaoaCost(2, ["0-1"], [0.7], [0.35], "density-cpu", noiseModel);
+
+    const originalRandom = Math.random;
+    try {
+      Math.random = random;
+      const sampled = sampleQaoaMeasurementEstimate(2, ["0-1"], [0.7], [0.35], 4096, "density-cpu", noiseModel);
+      expect(sampled.estimatedValue).toBeCloseTo(exact, 1);
+      expect(sampled.totalShotsUsed).toBe(4096);
+    } finally {
+      Math.random = originalRandom;
+    }
+  });
 });
 
 describe("evaluateVqeEnergy", () => {
@@ -156,6 +194,39 @@ describe("evaluateVqeEnergy", () => {
       densityGradients.forEach((value, index) => {
         expect(value, `seed=${testCase.seed} thetaGrad[${index}]`).toBeCloseTo(denseGradients[index]!, 9);
       });
+    }
+  });
+
+  it("makes representative VQE energies less favorable under stronger depolarizing noise", () => {
+    const noiseLevels = [0, 0.05, 0.15, 0.3] as const;
+    const values = noiseLevels.map((probability) =>
+      evaluateVqeEnergy(
+        [0.2, -0.3, 0.4, -0.1],
+        "HeH",
+        "density-cpu",
+        probability === 0 ? { kind: "ideal" } : { kind: "depolarizing", probability },
+      ),
+    );
+
+    expect(values[1]!).toBeGreaterThan(values[0]!);
+    expect(values[2]!).toBeGreaterThan(values[1]!);
+    expect(values[3]!).toBeGreaterThan(values[2]!);
+  });
+
+  it("makes noisy VQE shot estimates converge toward the exact noisy density value", () => {
+    const random = createSeededRandom(67890);
+    const noiseModel = { kind: "depolarizing", probability: 0.15 } as const;
+    const thetas = [0.2, -0.3, 0.4, -0.1];
+    const exact = evaluateVqeEnergy(thetas, "HeH", "density-cpu", noiseModel);
+
+    const originalRandom = Math.random;
+    try {
+      Math.random = random;
+      const sampled = sampleVqeMeasurementEstimate(thetas, "HeH", 4096, "density-cpu", noiseModel);
+      expect(sampled.estimatedValue).toBeCloseTo(exact, 1);
+      expect(sampled.totalShotsUsed).toBe(8192);
+    } finally {
+      Math.random = originalRandom;
     }
   });
 });
