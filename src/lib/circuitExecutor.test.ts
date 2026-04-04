@@ -8,6 +8,7 @@ import {
   sampleVqeMeasurementEstimate,
 } from "./algorithms";
 import {
+  densityCpuCircuitExecutor,
   denseCpuCircuitExecutor,
   evaluateCircuitObservables,
   executeCircuit,
@@ -36,6 +37,7 @@ describe("DenseCpuCircuitExecutor", () => {
     expect(supportsCapability(denseCpuCircuitExecutor, "shot-sampling")).toBe(true);
     expect(supportsCapability(denseCpuCircuitExecutor, "state-vector")).toBe(true);
     expect(getCircuitExecutor("dense-cpu")).toBe(denseCpuCircuitExecutor);
+    expect(getCircuitExecutor("density-cpu")).toBe(densityCpuCircuitExecutor);
   });
 
   it("executes circuits through the backend-agnostic entrypoint", () => {
@@ -194,6 +196,80 @@ describe("DenseCpuCircuitExecutor", () => {
         },
       }),
     ).toThrow(/finite rotation angle/i);
+  });
+});
+
+describe("DensityCpuCircuitExecutor", () => {
+  it("exposes backend metadata without state-vector capability", () => {
+    expect(densityCpuCircuitExecutor.backend).toBe("density-cpu");
+    expect(densityCpuCircuitExecutor.capabilities).toEqual([
+      "ideal-execution",
+      "expectation-values",
+      "shot-sampling",
+    ]);
+    expect(supportsCapability(densityCpuCircuitExecutor, "state-vector")).toBe(false);
+  });
+
+  it("matches dense-cpu observables in ideal mode", () => {
+    const circuit: ExecutableCircuit = {
+      qubitCount: 2,
+      operations: [
+        { kind: "ry", qubit: 0, theta: Math.PI / 2 },
+        { kind: "rx", qubit: 1, theta: Math.PI / 3 },
+        { kind: "xx", q1: 0, q2: 1, theta: Math.PI / 4 },
+      ],
+    };
+    const observables = [
+      { kind: "z", qubit: 0 } as const,
+      { kind: "z", qubit: 1 } as const,
+      { kind: "zz", q1: 0, q2: 1 } as const,
+      { kind: "xx", q1: 0, q2: 1 } as const,
+    ];
+
+    const denseValues = evaluateCircuitObservables(circuit, observables, "dense-cpu");
+    const densityValues = evaluateCircuitObservables(circuit, observables, "density-cpu");
+
+    expect(densityValues).toHaveLength(denseValues.length);
+    densityValues.forEach((value, index) => {
+      expect(value).toBeCloseTo(denseValues[index]!, 9);
+    });
+  });
+
+  it("executes a real depolarizing noise path", () => {
+    const idealResult = executeCircuit({
+      backend: "density-cpu",
+      circuit: {
+        qubitCount: 1,
+        operations: [{ kind: "rx", qubit: 0, theta: Math.PI }],
+      },
+      observables: [{ kind: "z", qubit: 0 }],
+      noiseModel: { kind: "ideal" },
+    });
+    const noisyResult = executeCircuit({
+      backend: "density-cpu",
+      circuit: {
+        qubitCount: 1,
+        operations: [{ kind: "rx", qubit: 0, theta: Math.PI }],
+      },
+      observables: [{ kind: "z", qubit: 0 }],
+      noiseModel: { kind: "depolarizing", probability: 0.3 },
+    });
+
+    expect(idealResult.expectationValues?.values[0]).toBeCloseTo(-1, 9);
+    expect(noisyResult.expectationValues?.values[0]).toBeCloseTo(-0.6, 9);
+  });
+
+  it("rejects state-vector requests for the density backend", () => {
+    expect(() =>
+      executeCircuit({
+        backend: "density-cpu",
+        circuit: {
+          qubitCount: 1,
+          operations: [{ kind: "ry", qubit: 0, theta: Math.PI / 2 }],
+        },
+        stateVector: { kind: "final-state-vector" },
+      }),
+    ).toThrow(/does not support executor capability "state-vector"/i);
   });
 });
 
