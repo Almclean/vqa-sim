@@ -107,6 +107,7 @@ describe("App", () => {
       [0.35, 0.175],
       4,
       "dense-cpu",
+      { kind: "ideal" },
     );
     expect(screen.getAllByText("3.250000")).toHaveLength(2);
     expect(screen.getByText(/shot budget used: 4 total measurements across one basis/i)).toBeInTheDocument();
@@ -136,6 +137,7 @@ describe("App", () => {
       "H2_0.74",
       3,
       "dense-cpu",
+      { kind: "ideal" },
     );
     expect(screen.getAllByText("-1.234500")).toHaveLength(2);
     expect(screen.getByText(/shot budget used: 6 total measurements across multiple bases/i)).toBeInTheDocument();
@@ -231,6 +233,8 @@ describe("App", () => {
       JSON.stringify({
         executionTarget: "ionq-simulator",
         ionqCredentialMode: "browser-session",
+        noiseModelKind: "ideal",
+        depolarizingProbability: 0.05,
       }),
     );
     expect(window.localStorage.getItem("vqa-sim:provider-session-credentials")).toBeNull();
@@ -242,5 +246,49 @@ describe("App", () => {
     expect(screen.getByLabelText(/execution target/i)).toHaveValue("ionq-simulator");
     expect(screen.getByLabelText(/ionq auth mode/i)).toHaveValue("browser-session");
     expect(screen.getByLabelText(/ionq api key/i)).toHaveValue("test-ionq-key");
+  });
+
+  it("shows density-matrix noise controls and uses the selected depolarizing model for local sampling", async () => {
+    const user = userEvent.setup();
+    vi.mocked(sampleQaoaMeasurementEstimate).mockReturnValue({
+      bitstrings: ["0011", "0000", "0011", "1100"],
+      estimatedValue: 2.5,
+      totalShotsUsed: 4,
+    });
+
+    render(<App />);
+
+    expect(screen.queryByLabelText(/^noise$/i)).not.toBeInTheDocument();
+
+    await user.selectOptions(screen.getByLabelText(/execution target/i), "density-cpu");
+
+    expect(screen.getByLabelText(/^noise$/i)).toHaveValue("ideal");
+    expect(screen.queryByLabelText(/depolarizing probability/i)).not.toBeInTheDocument();
+
+    await user.selectOptions(screen.getByLabelText(/^noise$/i), "depolarizing");
+
+    const probabilitySlider = screen.getByLabelText(/depolarizing probability/i);
+    fireEvent.change(probabilitySlider, { target: { value: "0.125" } });
+    fireEvent.change(screen.getByLabelText(/measurement shots per batch/i), { target: { value: "4" } });
+    await user.click(screen.getByRole("button", { name: /refresh sampled estimate/i }));
+    await waitFor(() => expect(sampleQaoaMeasurementEstimate).toHaveBeenCalled());
+
+    expect(sampleQaoaMeasurementEstimate).toHaveBeenCalledWith(
+      4,
+      ["0-1", "1-2", "2-3", "3-0"],
+      [0.7, 0.35],
+      [0.35, 0.175],
+      4,
+      "density-cpu",
+      { kind: "depolarizing", probability: 0.125 },
+    );
+    expect(window.localStorage.getItem("vqa-sim:backend-preferences")).toBe(
+      JSON.stringify({
+        executionTarget: "density-cpu",
+        ionqCredentialMode: "browser-session",
+        noiseModelKind: "depolarizing",
+        depolarizingProbability: 0.125,
+      }),
+    );
   });
 });

@@ -3,15 +3,19 @@ import {
   listBackendTargets,
   type BackendTargetId,
 } from "../lib/backendTargets";
-import type { IonQCredentialMode } from "../lib/backendPreferences";
+import type { IonQCredentialMode, NoiseModelKind } from "../lib/backendPreferences";
 
 type ExecutionBackendPanelProps = {
   executionTarget: BackendTargetId;
   ionqCredentialMode: IonQCredentialMode;
+  noiseModelKind: NoiseModelKind;
+  depolarizingProbability: number;
   ionqApiKey: string;
   ionqAuthConfigured: boolean;
   onExecutionTargetChange: (target: BackendTargetId) => void;
   onIonqCredentialModeChange: (mode: IonQCredentialMode) => void;
+  onNoiseModelKindChange: (kind: NoiseModelKind) => void;
+  onDepolarizingProbabilityChange: (probability: number) => void;
   onIonqApiKeyChange: (apiKey: string) => void;
   onClearIonqApiKey: () => void;
 };
@@ -19,15 +23,20 @@ type ExecutionBackendPanelProps = {
 export function ExecutionBackendPanel({
   executionTarget,
   ionqCredentialMode,
+  noiseModelKind,
+  depolarizingProbability,
   ionqApiKey,
   ionqAuthConfigured,
   onExecutionTargetChange,
   onIonqCredentialModeChange,
+  onNoiseModelKindChange,
+  onDepolarizingProbabilityChange,
   onIonqApiKeyChange,
   onClearIonqApiKey,
 }: ExecutionBackendPanelProps): JSX.Element {
   const descriptor = getBackendTargetDescriptor(executionTarget);
   const isRemoteTarget = descriptor.executionMode === "remote-job";
+  const supportsNoiseControls = executionTarget === "density-cpu";
   const targetOptions = listBackendTargets();
   const ionqStatusCopy =
     ionqCredentialMode === "browser-session"
@@ -58,6 +67,44 @@ export function ExecutionBackendPanel({
             ))}
           </select>
         </div>
+
+        {supportsNoiseControls ? (
+          <div className="space-y-3 rounded-md border border-neutral-800 bg-neutral-900 p-3">
+            <div>
+              <label className="mb-1 block text-xs font-medium text-neutral-300" htmlFor="noise-model-kind">
+                Noise
+              </label>
+              <select
+                id="noise-model-kind"
+                value={noiseModelKind}
+                onChange={(event) => onNoiseModelKindChange(event.target.value as NoiseModelKind)}
+                className="w-full rounded-md border border-neutral-700 bg-neutral-800 px-3 py-2 text-sm outline-none ring-cyan-400 focus:ring-2"
+              >
+                <option value="ideal">Ideal</option>
+                <option value="depolarizing">Depolarizing</option>
+              </select>
+            </div>
+
+            {noiseModelKind === "depolarizing" ? (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-3 text-xs text-neutral-400">
+                  <label htmlFor="depolarizing-probability">Depolarizing probability</label>
+                  <span className="font-mono text-neutral-200">{depolarizingProbability.toFixed(3)}</span>
+                </div>
+                <input
+                  id="depolarizing-probability"
+                  type="range"
+                  min={0}
+                  max={0.3}
+                  step={0.005}
+                  value={depolarizingProbability}
+                  onChange={(event) => onDepolarizingProbabilityChange(Number.parseFloat(event.target.value))}
+                  className="w-full accent-cyan-400"
+                />
+              </div>
+            ) : null}
+          </div>
+        ) : null}
 
         {descriptor.provider === "ionq" ? (
           <div className="space-y-2 rounded-md border border-neutral-800 bg-neutral-900 p-3">

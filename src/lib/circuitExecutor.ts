@@ -413,17 +413,20 @@ export const evaluateCircuitObservables = (
   circuit: ExecutableCircuit,
   observables: Observable[],
   backend: BackendKind = "dense-cpu",
-): number[] => executeCircuit({ backend, circuit, observables }).expectationValues?.values ?? [];
+  noiseModel?: NoiseModel,
+): number[] => executeCircuit({ backend, circuit, observables, noiseModel }).expectationValues?.values ?? [];
 
 export const sampleCircuitBitstrings = (
   circuit: ExecutableCircuit,
   shots: number,
   backend: BackendKind = "dense-cpu",
+  noiseModel?: NoiseModel,
 ): string[] => {
   const result = executeCircuit({
     backend,
     circuit,
     measurement: { kind: "all-qubits", shots },
+    noiseModel,
   });
 
   return result.measurement?.bitstrings ?? [];

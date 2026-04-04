@@ -111,12 +111,19 @@ const runSamplingJobOnBackend = (
         request.betas,
         request.shots,
         backend,
+        request.noiseModel ?? { kind: "ideal" },
       ),
     );
   }
 
   return toSamplingJobResult(
-    sampleVqeMeasurementEstimate(request.thetas, request.molecule, request.shots, backend),
+    sampleVqeMeasurementEstimate(
+      request.thetas,
+      request.molecule,
+      request.shots,
+      backend,
+      request.noiseModel ?? { kind: "ideal" },
+    ),
   );
 };
 

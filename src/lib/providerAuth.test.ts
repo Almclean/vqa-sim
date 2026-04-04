@@ -11,6 +11,8 @@ import {
 const makePreferences = (overrides?: Partial<BackendPreferences>): BackendPreferences => ({
   executionTarget: "dense-cpu",
   ionqCredentialMode: "browser-session",
+  noiseModelKind: "ideal",
+  depolarizingProbability: 0.05,
   ...overrides,
 });
 
