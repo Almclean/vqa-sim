@@ -58,6 +58,16 @@ const conjugateTranspose = (matrix: ComplexMatrix): ComplexMatrix => {
 const applyUnitaryToDensityMatrix = (densityMatrix: ComplexMatrix, unitary: ComplexMatrix): ComplexMatrix =>
   matrixMultiply(matrixMultiply(unitary, densityMatrix), conjugateTranspose(unitary));
 
+const applyKrausChannelToDensityMatrix = (densityMatrix: ComplexMatrix, operators: ComplexMatrix[]): ComplexMatrix =>
+  operators.reduce(
+    (sum, operator) =>
+      matrixAdd(
+        sum,
+        matrixMultiply(matrixMultiply(operator, densityMatrix), conjugateTranspose(operator)),
+      ),
+    zeroMatrix(densityMatrix.length),
+  );
+
 const kron = (a: ComplexMatrix, b: ComplexMatrix): ComplexMatrix => {
   const aDimension = a.length;
   const bDimension = b.length;
@@ -114,6 +124,17 @@ const PAULI_Y: ComplexMatrix = [
 const PAULI_Z: ComplexMatrix = [
   [complex(1), complex(0)],
   [complex(0), complex(-1)],
+];
+
+const amplitudeDampingOperators = (probability: number): [ComplexMatrix, ComplexMatrix] => [
+  [
+    [complex(1), complex(0)],
+    [complex(0), complex(Math.sqrt(1 - probability))],
+  ],
+  [
+    [complex(0), complex(Math.sqrt(probability))],
+    [complex(0), complex(0)],
+  ],
 ];
 
 const XX = (theta: number): ComplexMatrix => {
@@ -247,6 +268,17 @@ export class DensityMatrixSimulator {
       matrixScale(this.densityMatrix, 1 - probability),
       matrixScale(mixedContribution, probability / 3),
     );
+  }
+
+  applySingleQubitAmplitudeDamping(qubit: number, probability: number): void {
+    assertValidQubitIndex(this.nQubits, qubit);
+    if (probability <= 0) return;
+
+    const [e0, e1] = amplitudeDampingOperators(probability);
+    this.densityMatrix = applyKrausChannelToDensityMatrix(this.densityMatrix, [
+      embedSingleQubitOperator(this.nQubits, qubit, e0),
+      embedSingleQubitOperator(this.nQubits, qubit, e1),
+    ]);
   }
 
   expZ(qubit: number): number {

@@ -211,6 +211,23 @@ describe("DenseCpuCircuitExecutor", () => {
     ).toThrow(/invalid depolarizing probability/i);
   });
 
+  it("rejects unsupported composite noise requests", () => {
+    expect(() =>
+      denseCpuCircuitExecutor.execute({
+        circuit: {
+          qubitCount: 1,
+          operations: [],
+        },
+        noiseModel: {
+          kind: "composite",
+          depolarizingProbability: 0.02,
+          amplitudeDampingProbability: 0.01,
+          readoutErrorProbability: 0.03,
+        },
+      }),
+    ).toThrow(/unsupported noise model/i);
+  });
+
   it("rejects out-of-range circuit operations before execution", () => {
     expect(() =>
       executeCircuit({
@@ -333,6 +350,25 @@ describe("DensityCpuCircuitExecutor", () => {
     expect(noisyResult.expectationValues?.values[0]).toBeCloseTo(-0.6, 9);
   });
 
+  it("executes amplitude damping on the density backend", () => {
+    const dampedResult = executeCircuit({
+      backend: "density-cpu",
+      circuit: {
+        qubitCount: 1,
+        operations: [{ kind: "rx", qubit: 0, theta: Math.PI }],
+      },
+      observables: [{ kind: "z", qubit: 0 }],
+      noiseModel: {
+        kind: "composite",
+        depolarizingProbability: 0,
+        amplitudeDampingProbability: 0.3,
+        readoutErrorProbability: 0,
+      },
+    });
+
+    expect(dampedResult.expectationValues?.values[0]).toBeCloseTo(-0.4, 9);
+  });
+
   it("matches dense-cpu sampling in ideal mode for shared random draws", () => {
     const circuit: ExecutableCircuit = {
       qubitCount: 2,
@@ -396,6 +432,46 @@ describe("DensityCpuCircuitExecutor", () => {
         { kind: "depolarizing", probability: 0.3 },
       ),
     ).toEqual(["0", "0", "1", "1", "1"]);
+  });
+
+  it("applies readout error after noisy density sampling", () => {
+    const samples = [0.9, 0.1, 0.3, 0.24, 0.26, 0.8];
+    vi.spyOn(Math, "random").mockImplementation(() => samples.shift() ?? 0.9);
+
+    expect(
+      sampleCircuitBitstrings(
+        {
+          qubitCount: 1,
+          operations: [{ kind: "rx", qubit: 0, theta: Math.PI }],
+        },
+        3,
+        "density-cpu",
+        {
+          kind: "composite",
+          depolarizingProbability: 0,
+          amplitudeDampingProbability: 0,
+          readoutErrorProbability: 0.25,
+        },
+      ),
+    ).toEqual(["0", "1", "1"]);
+  });
+
+  it("rejects invalid composite noise probabilities", () => {
+    expect(() =>
+      executeCircuit({
+        backend: "density-cpu",
+        circuit: {
+          qubitCount: 1,
+          operations: [],
+        },
+        noiseModel: {
+          kind: "composite",
+          depolarizingProbability: 0.1,
+          amplitudeDampingProbability: -0.2,
+          readoutErrorProbability: 0,
+        },
+      }),
+    ).toThrow(/invalid amplitude damping probability/i);
   });
 
   it("rejects state-vector requests for the density backend", () => {

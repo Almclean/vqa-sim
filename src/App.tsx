@@ -48,6 +48,7 @@ import {
   parseAndValidateEdge,
   resizeArray,
 } from "./lib/utils";
+import { resolveNoiseSettingsForProfile } from "./lib/noiseProfiles";
 import type { Algorithm, CircuitMode } from "./types";
 
 type LiveState = {
@@ -188,17 +189,35 @@ export default function App(): JSX.Element {
       };
     }
 
+    const noiseSettings = resolveNoiseSettingsForProfile(backendPreferences.noiseProfileId, {
+      depolarizingProbability: backendPreferences.depolarizingProbability,
+      amplitudeDampingProbability: backendPreferences.amplitudeDampingProbability,
+      readoutErrorProbability: backendPreferences.readoutErrorProbability,
+    });
+
+    const hasNoise =
+      noiseSettings.depolarizingProbability > 0 ||
+      noiseSettings.amplitudeDampingProbability > 0 ||
+      noiseSettings.readoutErrorProbability > 0;
+
     return {
       backend: "density-cpu",
-      noiseModel:
-        backendPreferences.noiseModelKind === "depolarizing"
-          ? {
-              kind: "depolarizing",
-              probability: backendPreferences.depolarizingProbability,
-            }
-          : { kind: "ideal" },
+      noiseModel: hasNoise
+        ? {
+            kind: "composite",
+            depolarizingProbability: noiseSettings.depolarizingProbability,
+            amplitudeDampingProbability: noiseSettings.amplitudeDampingProbability,
+            readoutErrorProbability: noiseSettings.readoutErrorProbability,
+          }
+        : { kind: "ideal" },
     };
-  }, [backendPreferences.depolarizingProbability, backendPreferences.executionTarget, backendPreferences.noiseModelKind]);
+  }, [
+    backendPreferences.amplitudeDampingProbability,
+    backendPreferences.depolarizingProbability,
+    backendPreferences.executionTarget,
+    backendPreferences.noiseProfileId,
+    backendPreferences.readoutErrorProbability,
+  ]);
 
   const currentMetric = useMemo(() => {
     if (algorithm === "qaoa") {
@@ -277,9 +296,11 @@ export default function App(): JSX.Element {
     setSamplingNotice(null);
   }, [
     algorithm,
+    backendPreferences.amplitudeDampingProbability,
     backendPreferences.depolarizingProbability,
     backendPreferences.executionTarget,
-    backendPreferences.noiseModelKind,
+    backendPreferences.noiseProfileId,
+    backendPreferences.readoutErrorProbability,
     betas,
     effectiveEdges,
     gammas,
@@ -630,8 +651,10 @@ export default function App(): JSX.Element {
             <ExecutionBackendPanel
               executionTarget={backendPreferences.executionTarget}
               ionqCredentialMode={backendPreferences.ionqCredentialMode}
-              noiseModelKind={backendPreferences.noiseModelKind}
+              noiseProfileId={backendPreferences.noiseProfileId}
               depolarizingProbability={backendPreferences.depolarizingProbability}
+              amplitudeDampingProbability={backendPreferences.amplitudeDampingProbability}
+              readoutErrorProbability={backendPreferences.readoutErrorProbability}
               ionqApiKey={providerSessionCredentials.ionqApiKey}
               ionqAuthConfigured={selectedExecutionTargetAuthStatus.configured}
               onExecutionTargetChange={(executionTarget) =>
@@ -646,16 +669,28 @@ export default function App(): JSX.Element {
                   ionqCredentialMode,
                 }))
               }
-              onNoiseModelKindChange={(noiseModelKind) =>
+              onNoiseProfileChange={(noiseProfileId) =>
                 setBackendPreferences((prev) => ({
                   ...prev,
-                  noiseModelKind,
+                  noiseProfileId,
                 }))
               }
               onDepolarizingProbabilityChange={(depolarizingProbability) =>
                 setBackendPreferences((prev) => ({
                   ...prev,
                   depolarizingProbability,
+                }))
+              }
+              onAmplitudeDampingProbabilityChange={(amplitudeDampingProbability) =>
+                setBackendPreferences((prev) => ({
+                  ...prev,
+                  amplitudeDampingProbability,
+                }))
+              }
+              onReadoutErrorProbabilityChange={(readoutErrorProbability) =>
+                setBackendPreferences((prev) => ({
+                  ...prev,
+                  readoutErrorProbability,
                 }))
               }
               onIonqApiKeyChange={(ionqApiKey) =>

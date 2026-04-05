@@ -27,8 +27,31 @@ describe("backendPreferences", () => {
     expect(loadBackendPreferences()).toEqual({
       executionTarget: "ionq-simulator",
       ionqCredentialMode: "browser-session",
-      noiseModelKind: "ideal",
+      noiseProfileId: "ideal",
       depolarizingProbability: 0.05,
+      amplitudeDampingProbability: 0.02,
+      readoutErrorProbability: 0.01,
+    });
+  });
+
+  it("migrates legacy depolarizing preferences into the custom noise profile", () => {
+    window.localStorage.setItem(
+      "vqa-sim:backend-preferences",
+      JSON.stringify({
+        executionTarget: "density-cpu",
+        ionqCredentialMode: "browser-session",
+        noiseModelKind: "depolarizing",
+        depolarizingProbability: 0.12,
+      }),
+    );
+
+    expect(loadBackendPreferences()).toEqual({
+      executionTarget: "density-cpu",
+      ionqCredentialMode: "browser-session",
+      noiseProfileId: "custom",
+      depolarizingProbability: 0.12,
+      amplitudeDampingProbability: 0.02,
+      readoutErrorProbability: 0.01,
     });
   });
 
@@ -36,8 +59,10 @@ describe("backendPreferences", () => {
     const preferences: BackendPreferences = {
       executionTarget: "ionq-qpu",
       ionqCredentialMode: "server-managed",
-      noiseModelKind: "depolarizing",
+      noiseProfileId: "custom",
       depolarizingProbability: 0.12,
+      amplitudeDampingProbability: 0.04,
+      readoutErrorProbability: 0.03,
     };
 
     saveBackendPreferences(preferences);
@@ -46,8 +71,10 @@ describe("backendPreferences", () => {
       JSON.stringify({
         executionTarget: "ionq-qpu",
         ionqCredentialMode: "server-managed",
-        noiseModelKind: "depolarizing",
+        noiseProfileId: "custom",
         depolarizingProbability: 0.12,
+        amplitudeDampingProbability: 0.04,
+        readoutErrorProbability: 0.03,
       }),
     );
   });
