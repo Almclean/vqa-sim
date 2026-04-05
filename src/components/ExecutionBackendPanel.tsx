@@ -3,19 +3,28 @@ import {
   listBackendTargets,
   type BackendTargetId,
 } from "../lib/backendTargets";
-import type { IonQCredentialMode, NoiseModelKind } from "../lib/backendPreferences";
+import type { IonQCredentialMode } from "../lib/backendPreferences";
+import {
+  getNoiseProfileDescriptor,
+  listNoiseProfiles,
+  type NoiseProfileId,
+} from "../lib/noiseProfiles";
 
 type ExecutionBackendPanelProps = {
   executionTarget: BackendTargetId;
   ionqCredentialMode: IonQCredentialMode;
-  noiseModelKind: NoiseModelKind;
+  noiseProfileId: NoiseProfileId;
   depolarizingProbability: number;
+  amplitudeDampingProbability: number;
+  readoutErrorProbability: number;
   ionqApiKey: string;
   ionqAuthConfigured: boolean;
   onExecutionTargetChange: (target: BackendTargetId) => void;
   onIonqCredentialModeChange: (mode: IonQCredentialMode) => void;
-  onNoiseModelKindChange: (kind: NoiseModelKind) => void;
+  onNoiseProfileChange: (profileId: NoiseProfileId) => void;
   onDepolarizingProbabilityChange: (probability: number) => void;
+  onAmplitudeDampingProbabilityChange: (probability: number) => void;
+  onReadoutErrorProbabilityChange: (probability: number) => void;
   onIonqApiKeyChange: (apiKey: string) => void;
   onClearIonqApiKey: () => void;
 };
@@ -23,14 +32,18 @@ type ExecutionBackendPanelProps = {
 export function ExecutionBackendPanel({
   executionTarget,
   ionqCredentialMode,
-  noiseModelKind,
+  noiseProfileId,
   depolarizingProbability,
+  amplitudeDampingProbability,
+  readoutErrorProbability,
   ionqApiKey,
   ionqAuthConfigured,
   onExecutionTargetChange,
   onIonqCredentialModeChange,
-  onNoiseModelKindChange,
+  onNoiseProfileChange,
   onDepolarizingProbabilityChange,
+  onAmplitudeDampingProbabilityChange,
+  onReadoutErrorProbabilityChange,
   onIonqApiKeyChange,
   onClearIonqApiKey,
 }: ExecutionBackendPanelProps): JSX.Element {
@@ -38,6 +51,9 @@ export function ExecutionBackendPanel({
   const isRemoteTarget = descriptor.executionMode === "remote-job";
   const supportsNoiseControls = executionTarget === "density-cpu";
   const targetOptions = listBackendTargets();
+  const noiseProfileOptions = listNoiseProfiles();
+  const selectedNoiseProfile = getNoiseProfileDescriptor(noiseProfileId);
+  const isCustomNoiseProfile = noiseProfileId === "custom";
   const ionqStatusCopy =
     ionqCredentialMode === "browser-session"
       ? ionqAuthConfigured
@@ -71,36 +87,111 @@ export function ExecutionBackendPanel({
         {supportsNoiseControls ? (
           <div className="space-y-3 rounded-md border border-neutral-800 bg-neutral-900 p-3">
             <div>
-              <label className="mb-1 block text-xs font-medium text-neutral-300" htmlFor="noise-model-kind">
-                Noise
+              <label className="mb-1 block text-xs font-medium text-neutral-300" htmlFor="noise-profile">
+                Noise profile
               </label>
               <select
-                id="noise-model-kind"
-                value={noiseModelKind}
-                onChange={(event) => onNoiseModelKindChange(event.target.value as NoiseModelKind)}
+                id="noise-profile"
+                value={noiseProfileId}
+                onChange={(event) => onNoiseProfileChange(event.target.value as NoiseProfileId)}
                 className="w-full rounded-md border border-neutral-700 bg-neutral-800 px-3 py-2 text-sm outline-none ring-cyan-400 focus:ring-2"
               >
-                <option value="ideal">Ideal</option>
-                <option value="depolarizing">Depolarizing</option>
+                {noiseProfileOptions.map((profile) => (
+                  <option key={profile.id} value={profile.id}>
+                    {profile.label}
+                  </option>
+                ))}
               </select>
             </div>
 
-            {noiseModelKind === "depolarizing" ? (
-              <div className="space-y-2">
-                <div className="flex items-center justify-between gap-3 text-xs text-neutral-400">
-                  <label htmlFor="depolarizing-probability">Depolarizing probability</label>
-                  <span className="font-mono text-neutral-200">{depolarizingProbability.toFixed(3)}</span>
+            {noiseProfileId !== "ideal" ? (
+              <div className="space-y-3">
+                <div className="grid grid-cols-3 gap-2 text-[11px] uppercase tracking-[0.18em] text-neutral-500">
+                  <div className="rounded-md border border-neutral-800 bg-neutral-950/80 px-2 py-2">
+                    <div>Depol</div>
+                    <div className="mt-1 font-mono text-neutral-200">
+                      {(isCustomNoiseProfile
+                        ? depolarizingProbability
+                        : selectedNoiseProfile.settings.depolarizingProbability
+                      ).toFixed(3)}
+                    </div>
+                  </div>
+                  <div className="rounded-md border border-neutral-800 bg-neutral-950/80 px-2 py-2">
+                    <div>T1</div>
+                    <div className="mt-1 font-mono text-neutral-200">
+                      {(isCustomNoiseProfile
+                        ? amplitudeDampingProbability
+                        : selectedNoiseProfile.settings.amplitudeDampingProbability
+                      ).toFixed(3)}
+                    </div>
+                  </div>
+                  <div className="rounded-md border border-neutral-800 bg-neutral-950/80 px-2 py-2">
+                    <div>Readout</div>
+                    <div className="mt-1 font-mono text-neutral-200">
+                      {(isCustomNoiseProfile
+                        ? readoutErrorProbability
+                        : selectedNoiseProfile.settings.readoutErrorProbability
+                      ).toFixed(3)}
+                    </div>
+                  </div>
                 </div>
-                <input
-                  id="depolarizing-probability"
-                  type="range"
-                  min={0}
-                  max={0.3}
-                  step={0.005}
-                  value={depolarizingProbability}
-                  onChange={(event) => onDepolarizingProbabilityChange(Number.parseFloat(event.target.value))}
-                  className="w-full accent-cyan-400"
-                />
+
+                {isCustomNoiseProfile ? (
+                  <div className="space-y-3">
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between gap-3 text-xs text-neutral-400">
+                        <label htmlFor="depolarizing-probability">Depolarizing probability</label>
+                        <span className="font-mono text-neutral-200">{depolarizingProbability.toFixed(3)}</span>
+                      </div>
+                      <input
+                        id="depolarizing-probability"
+                        type="range"
+                        min={0}
+                        max={0.2}
+                        step={0.0025}
+                        value={depolarizingProbability}
+                        onChange={(event) => onDepolarizingProbabilityChange(Number.parseFloat(event.target.value))}
+                        className="w-full accent-cyan-400"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between gap-3 text-xs text-neutral-400">
+                        <label htmlFor="amplitude-damping-probability">Amplitude damping</label>
+                        <span className="font-mono text-neutral-200">{amplitudeDampingProbability.toFixed(3)}</span>
+                      </div>
+                      <input
+                        id="amplitude-damping-probability"
+                        type="range"
+                        min={0}
+                        max={0.2}
+                        step={0.0025}
+                        value={amplitudeDampingProbability}
+                        onChange={(event) =>
+                          onAmplitudeDampingProbabilityChange(Number.parseFloat(event.target.value))
+                        }
+                        className="w-full accent-cyan-400"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between gap-3 text-xs text-neutral-400">
+                        <label htmlFor="readout-error-probability">Readout error</label>
+                        <span className="font-mono text-neutral-200">{readoutErrorProbability.toFixed(3)}</span>
+                      </div>
+                      <input
+                        id="readout-error-probability"
+                        type="range"
+                        min={0}
+                        max={0.2}
+                        step={0.0025}
+                        value={readoutErrorProbability}
+                        onChange={(event) => onReadoutErrorProbabilityChange(Number.parseFloat(event.target.value))}
+                        className="w-full accent-cyan-400"
+                      />
+                    </div>
+                  </div>
+                ) : null}
               </div>
             ) : null}
           </div>

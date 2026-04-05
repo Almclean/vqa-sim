@@ -34,6 +34,12 @@ export type NoiseModel =
   | {
       kind: "depolarizing";
       probability: number;
+    }
+  | {
+      kind: "composite";
+      depolarizingProbability: number;
+      amplitudeDampingProbability: number;
+      readoutErrorProbability: number;
     };
 
 export type ExecutionRequest = {
@@ -170,11 +176,63 @@ const assertValidStateVectorRequest = (stateVector?: StateVectorRequest): void =
 const assertValidNoiseModel = (noiseModel?: NoiseModel): void => {
   if (!noiseModel || noiseModel.kind === "ideal") return;
 
-  if (!Number.isFinite(noiseModel.probability) || noiseModel.probability < 0 || noiseModel.probability > 1) {
-    throw new Error(
-      `Invalid depolarizing probability ${noiseModel.probability}; expected a finite value between 0 and 1.`,
-    );
+  const probabilityEntries =
+    noiseModel.kind === "depolarizing"
+      ? [["depolarizing", noiseModel.probability] as const]
+      : ([
+          ["depolarizing", noiseModel.depolarizingProbability],
+          ["amplitude damping", noiseModel.amplitudeDampingProbability],
+          ["readout error", noiseModel.readoutErrorProbability],
+        ] as const);
+
+  for (const [label, value] of probabilityEntries) {
+    if (!Number.isFinite(value) || value < 0 || value > 1) {
+      throw new Error(`Invalid ${label} probability ${value}; expected a finite value between 0 and 1.`);
+    }
   }
+};
+
+type ResolvedNoiseSettings = {
+  depolarizingProbability: number;
+  amplitudeDampingProbability: number;
+  readoutErrorProbability: number;
+};
+
+const resolveNoiseSettings = (noiseModel?: NoiseModel): ResolvedNoiseSettings => {
+  if (!noiseModel || noiseModel.kind === "ideal") {
+    return {
+      depolarizingProbability: 0,
+      amplitudeDampingProbability: 0,
+      readoutErrorProbability: 0,
+    };
+  }
+
+  if (noiseModel.kind === "depolarizing") {
+    return {
+      depolarizingProbability: noiseModel.probability,
+      amplitudeDampingProbability: 0,
+      readoutErrorProbability: 0,
+    };
+  }
+
+  return {
+    depolarizingProbability: noiseModel.depolarizingProbability,
+    amplitudeDampingProbability: noiseModel.amplitudeDampingProbability,
+    readoutErrorProbability: noiseModel.readoutErrorProbability,
+  };
+};
+
+const applyReadoutError = (bitstrings: string[], probability: number): string[] => {
+  if (probability <= 0) return bitstrings;
+
+  return bitstrings.map((bitstring) =>
+    [...bitstring]
+      .map((bit) => {
+        if (Math.random() >= probability) return bit;
+        return bit === "0" ? "1" : "0";
+      })
+      .join(""),
+  );
 };
 
 const probabilityOfIndex = (sim: QuantumSimulator, index: number): number => {
@@ -318,11 +376,12 @@ export class DensityCpuCircuitExecutor implements CircuitExecutor {
     }
 
     const sim = new DensityMatrixSimulator(circuit.qubitCount);
+    const resolvedNoise = resolveNoiseSettings(noiseModel);
 
-    const maybeApplyDepolarizingNoise = (qubits: number[]): void => {
-      if (!noiseModel || noiseModel.kind === "ideal") return;
+    const maybeApplyNoise = (qubits: number[]): void => {
       for (const qubit of qubits) {
-        sim.applySingleQubitDepolarizing(qubit, noiseModel.probability);
+        sim.applySingleQubitDepolarizing(qubit, resolvedNoise.depolarizingProbability);
+        sim.applySingleQubitAmplitudeDamping(qubit, resolvedNoise.amplitudeDampingProbability);
       }
     };
 
@@ -330,15 +389,15 @@ export class DensityCpuCircuitExecutor implements CircuitExecutor {
       switch (operation.kind) {
         case "rx":
           sim.applyRx(operation.qubit, operation.theta);
-          maybeApplyDepolarizingNoise([operation.qubit]);
+          maybeApplyNoise([operation.qubit]);
           break;
         case "ry":
           sim.applyRy(operation.qubit, operation.theta);
-          maybeApplyDepolarizingNoise([operation.qubit]);
+          maybeApplyNoise([operation.qubit]);
           break;
         case "xx":
           sim.applyXX(operation.q1, operation.q2, operation.theta);
-          maybeApplyDepolarizingNoise([operation.q1, operation.q2]);
+          maybeApplyNoise([operation.q1, operation.q2]);
           break;
         default: {
           const exhaustiveCheck: never = operation;
@@ -375,7 +434,10 @@ export class DensityCpuCircuitExecutor implements CircuitExecutor {
           ? {
               kind: "all-qubits",
               shots: measurement.shots,
-              bitstrings: probabilitiesToBitstrings(sim.measurementProbabilities(), circuit.qubitCount, measurement.shots),
+              bitstrings: applyReadoutError(
+                probabilitiesToBitstrings(sim.measurementProbabilities(), circuit.qubitCount, measurement.shots),
+                resolvedNoise.readoutErrorProbability,
+              ),
             }
           : undefined,
     };

@@ -1,13 +1,20 @@
 import { getBackendTargetDescriptor, type BackendTargetId } from "./backendTargets";
+import {
+  DEFAULT_CUSTOM_NOISE_SETTINGS,
+  isValidNoiseProfileId,
+  normalizeNoiseSettings,
+  type NoiseProfileId,
+} from "./noiseProfiles";
 
 export type IonQCredentialMode = "browser-session" | "server-managed";
-export type NoiseModelKind = "ideal" | "depolarizing";
 
 export type BackendPreferences = {
   executionTarget: BackendTargetId;
   ionqCredentialMode: IonQCredentialMode;
-  noiseModelKind: NoiseModelKind;
+  noiseProfileId: NoiseProfileId;
   depolarizingProbability: number;
+  amplitudeDampingProbability: number;
+  readoutErrorProbability: number;
 };
 
 const BACKEND_PREFERENCES_STORAGE_KEY = "vqa-sim:backend-preferences";
@@ -15,8 +22,10 @@ const BACKEND_PREFERENCES_STORAGE_KEY = "vqa-sim:backend-preferences";
 export const DEFAULT_BACKEND_PREFERENCES: BackendPreferences = {
   executionTarget: "dense-cpu",
   ionqCredentialMode: "browser-session",
-  noiseModelKind: "ideal",
-  depolarizingProbability: 0.05,
+  noiseProfileId: "ideal",
+  depolarizingProbability: DEFAULT_CUSTOM_NOISE_SETTINGS.depolarizingProbability,
+  amplitudeDampingProbability: DEFAULT_CUSTOM_NOISE_SETTINGS.amplitudeDampingProbability,
+  readoutErrorProbability: DEFAULT_CUSTOM_NOISE_SETTINGS.readoutErrorProbability,
 };
 
 const isValidBackendTargetId = (value: unknown): value is BackendTargetId => {
@@ -33,17 +42,6 @@ const isValidBackendTargetId = (value: unknown): value is BackendTargetId => {
 const isValidIonQCredentialMode = (value: unknown): value is IonQCredentialMode =>
   value === "browser-session" || value === "server-managed";
 
-const isValidNoiseModelKind = (value: unknown): value is NoiseModelKind =>
-  value === "ideal" || value === "depolarizing";
-
-const normalizeDepolarizingProbability = (value: unknown): number => {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    return DEFAULT_BACKEND_PREFERENCES.depolarizingProbability;
-  }
-
-  return Math.min(1, Math.max(0, value));
-};
-
 export const loadBackendPreferences = (): BackendPreferences => {
   if (typeof window === "undefined") return DEFAULT_BACKEND_PREFERENCES;
 
@@ -52,6 +50,21 @@ export const loadBackendPreferences = (): BackendPreferences => {
     if (!raw) return DEFAULT_BACKEND_PREFERENCES;
 
     const parsed = JSON.parse(raw) as Partial<BackendPreferences>;
+    const legacyNoiseModelKind = (parsed as { noiseModelKind?: unknown }).noiseModelKind;
+    const noiseProfileId = isValidNoiseProfileId(parsed.noiseProfileId)
+      ? parsed.noiseProfileId
+      : legacyNoiseModelKind === "depolarizing"
+        ? "custom"
+        : DEFAULT_BACKEND_PREFERENCES.noiseProfileId;
+    const customNoiseSettings = normalizeNoiseSettings(
+      {
+        depolarizingProbability: parsed.depolarizingProbability,
+        amplitudeDampingProbability: parsed.amplitudeDampingProbability,
+        readoutErrorProbability: parsed.readoutErrorProbability,
+      },
+      DEFAULT_CUSTOM_NOISE_SETTINGS,
+    );
+
     return {
       executionTarget: isValidBackendTargetId(parsed.executionTarget)
         ? parsed.executionTarget
@@ -59,10 +72,10 @@ export const loadBackendPreferences = (): BackendPreferences => {
       ionqCredentialMode: isValidIonQCredentialMode(parsed.ionqCredentialMode)
         ? parsed.ionqCredentialMode
         : DEFAULT_BACKEND_PREFERENCES.ionqCredentialMode,
-      noiseModelKind: isValidNoiseModelKind(parsed.noiseModelKind)
-        ? parsed.noiseModelKind
-        : DEFAULT_BACKEND_PREFERENCES.noiseModelKind,
-      depolarizingProbability: normalizeDepolarizingProbability(parsed.depolarizingProbability),
+      noiseProfileId,
+      depolarizingProbability: customNoiseSettings.depolarizingProbability,
+      amplitudeDampingProbability: customNoiseSettings.amplitudeDampingProbability,
+      readoutErrorProbability: customNoiseSettings.readoutErrorProbability,
     };
   } catch {
     return DEFAULT_BACKEND_PREFERENCES;

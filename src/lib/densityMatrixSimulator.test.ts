@@ -111,6 +111,21 @@ describe("DensityMatrixSimulator", () => {
     expect(afterNoise).toBeCloseTo(-0.6, 9);
   });
 
+  it("applies single-qubit amplitude damping to relax excited-state population", () => {
+    const simulator = new DensityMatrixSimulator(1);
+    simulator.applyRx(0, Math.PI);
+
+    expect(simulator.expZ(0)).toBeCloseTo(-1, 9);
+
+    simulator.applySingleQubitAmplitudeDamping(0, 0.3);
+
+    expect(simulator.expZ(0)).toBeCloseTo(-0.4, 9);
+    expect(simulator.measurementProbabilities()).toEqual([
+      expect.closeTo(0.3, 9),
+      expect.closeTo(0.7, 9),
+    ]);
+  });
+
   it("preserves normalized non-negative populations under multi-qubit depolarizing noise", () => {
     const simulator = new DensityMatrixSimulator(2);
     simulator.applyRy(0, Math.PI / 2);
@@ -131,6 +146,26 @@ describe("DensityMatrixSimulator", () => {
     expect(Math.abs(simulator.expZ(1))).toBeLessThanOrEqual(1 + 1e-12);
     expect(Math.abs(simulator.expZZ(0, 1))).toBeLessThanOrEqual(1 + 1e-12);
     expect(Math.abs(simulator.expXX(0, 1))).toBeLessThanOrEqual(1 + 1e-12);
+  });
+
+  it("preserves normalized non-negative populations under mixed depolarizing and amplitude-damping noise", () => {
+    const simulator = new DensityMatrixSimulator(2);
+    simulator.applyRy(0, Math.PI / 2);
+    simulator.applyRx(1, Math.PI / 3);
+    simulator.applyXX(0, 1, Math.PI / 4);
+    simulator.applySingleQubitDepolarizing(0, 0.12);
+    simulator.applySingleQubitAmplitudeDamping(0, 0.08);
+    simulator.applySingleQubitDepolarizing(1, 0.05);
+    simulator.applySingleQubitAmplitudeDamping(1, 0.15);
+
+    const probabilities = simulator.measurementProbabilities();
+    const totalProbability = probabilities.reduce((sum, probability) => sum + probability, 0);
+
+    expect(totalProbability).toBeCloseTo(1, 12);
+    probabilities.forEach((probability) => {
+      expect(probability).toBeGreaterThanOrEqual(-1e-12);
+      expect(probability).toBeLessThanOrEqual(1 + 1e-12);
+    });
   });
 });
 
